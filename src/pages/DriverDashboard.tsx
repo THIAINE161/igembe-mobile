@@ -166,6 +166,15 @@ export default function DriverDashboard() {
         )}
 
       </div>
+
+      {/* Bottom Nav */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-3">
+        <div className="flex justify-around">
+          <NavItem emoji="📦" label="Assigned" active={activeTab === 'pending'} onClick={() => setActiveTab('pending')} />
+          <NavItem emoji="✅" label="Completed" active={activeTab === 'completed'} onClick={() => setActiveTab('completed')} />
+          <NavItem emoji="👤" label="Profile" active={false} onClick={() => navigate('/driver/profile')} />
+        </div>
+      </div>
     </div>
   )
 }

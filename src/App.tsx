@@ -6,6 +6,7 @@ import RoleSelectPage from './pages/RoleSelectPage'
 import FarmerDashboard from './pages/FarmerDashboard'
 import DriverDashboard from './pages/DriverDashboard'
 import NewHarvestMobilePage from './pages/NewHarvestMobilePage'
+import ProfilePage from './pages/ProfilePage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useMobileStore()
@@ -27,8 +28,14 @@ function App() {
         <Route path="/farmer/harvest/new" element={
           <ProtectedRoute><NewHarvestMobilePage /></ProtectedRoute>
         } />
+        <Route path="/farmer/profile" element={
+          <ProtectedRoute><ProfilePage /></ProtectedRoute>
+        } />
         <Route path="/driver" element={
           <ProtectedRoute><DriverDashboard /></ProtectedRoute>
+        } />
+        <Route path="/driver/profile" element={
+          <ProtectedRoute><ProfilePage /></ProtectedRoute>
         } />
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
