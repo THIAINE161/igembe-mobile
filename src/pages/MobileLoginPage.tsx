@@ -50,7 +50,22 @@ export default function MobileLoginPage() {
     <div className="min-h-screen flex flex-col bg-green-700">
 
       {/* Top section */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-16 pb-8">
+      {/* Add miraa visual to mobile login */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-16 pb-8 relative">
+        {/* Miraa leaf decorations */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {['🌿', '🍃', '🌱', '🌿'].map((emoji, i) => (
+            <div key={i} className="absolute text-5xl opacity-10"
+              style={{
+                top: `${[10, 60, 30, 80][i]}%`,
+                left: `${[10, 80, 70, 20][i]}%`,
+                transform: `rotate(${[20, -15, 10, -20][i]}deg)`
+              }}>
+              {emoji}
+            </div>
+          ))}
+        </div>
+        {/* Logo and text */}
         <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl">
           <span className="text-green-700 text-4xl font-black">IG</span>
         </div>

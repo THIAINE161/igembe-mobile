@@ -7,6 +7,8 @@ import FarmerDashboard from './pages/FarmerDashboard'
 import DriverDashboard from './pages/DriverDashboard'
 import NewHarvestMobilePage from './pages/NewHarvestMobilePage'
 import ProfilePage from './pages/ProfilePage'
+import AgrovetOrderPage from './pages/AgrovetOrderPage'
+import HarvestInvoiceMobilePage from './pages/HarvestInvoiceMobilePage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useMobileStore()
@@ -19,24 +21,14 @@ function App() {
       <Routes>
         <Route path="/login" element={<MobileLoginPage />} />
         <Route path="/forgot-pin" element={<ForgotPinPage />} />
-        <Route path="/select-role" element={
-          <ProtectedRoute><RoleSelectPage /></ProtectedRoute>
-        } />
-        <Route path="/farmer" element={
-          <ProtectedRoute><FarmerDashboard /></ProtectedRoute>
-        } />
-        <Route path="/farmer/harvest/new" element={
-          <ProtectedRoute><NewHarvestMobilePage /></ProtectedRoute>
-        } />
-        <Route path="/farmer/profile" element={
-          <ProtectedRoute><ProfilePage /></ProtectedRoute>
-        } />
-        <Route path="/driver" element={
-          <ProtectedRoute><DriverDashboard /></ProtectedRoute>
-        } />
-        <Route path="/driver/profile" element={
-          <ProtectedRoute><ProfilePage /></ProtectedRoute>
-        } />
+        <Route path="/select-role" element={<ProtectedRoute><RoleSelectPage /></ProtectedRoute>} />
+        <Route path="/farmer" element={<ProtectedRoute><FarmerDashboard /></ProtectedRoute>} />
+        <Route path="/farmer/harvest/new" element={<ProtectedRoute><NewHarvestMobilePage /></ProtectedRoute>} />
+        <Route path="/farmer/harvest/:id/invoice" element={<ProtectedRoute><HarvestInvoiceMobilePage /></ProtectedRoute>} />
+        <Route path="/farmer/agrovet" element={<ProtectedRoute><AgrovetOrderPage /></ProtectedRoute>} />
+        <Route path="/farmer/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/driver" element={<ProtectedRoute><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/driver/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
