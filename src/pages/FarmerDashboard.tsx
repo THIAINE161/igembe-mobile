@@ -6,6 +6,13 @@ import api from '../lib/api'
 export default function FarmerDashboard() {
   const navigate = useNavigate()
   const { member, roles, logout, setActiveRole } = useMobileStore()
+
+  // Add this BEFORE the useEffect
+  if (!member) {
+    navigate('/login')
+    return null
+  }
+
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'home' | 'harvests' | 'savings' | 'loans'>('home')
@@ -42,6 +49,7 @@ export default function FarmerDashboard() {
     </div>
   )
 
+  // Add these safety checks
   const totalSavings = data?.totalSavings || 0
   const activeLoans = data?.activeLoans || []
   const recentHarvests = data?.recentHarvests || []
@@ -132,7 +140,6 @@ export default function FarmerDashboard() {
             KES {totalSavings.toLocaleString()}
           </p>
 
-          {/* UPDATED GRID */}
           <div className="grid grid-cols-5 gap-2">
             <button onClick={() => setActiveTab('savings')}
               className="bg-white bg-opacity-10 rounded-xl p-2.5 text-center">
@@ -152,7 +159,6 @@ export default function FarmerDashboard() {
               <p className="text-green-200 text-xs">Harvests</p>
             </button>
 
-            {/* NEW AGROVET BUTTON */}
             <QuickAction emoji="🌱" label="AgroVet" color="bg-emerald-50 border-emerald-200"
               onClick={() => navigate('/farmer/agrovet')} />
           </div>
@@ -170,13 +176,11 @@ export default function FarmerDashboard() {
               return (
                 <div key={h.id} className="border border-gray-200 rounded-2xl overflow-hidden">
                   <div className="p-4">
-                    {/* TOTAL */}
                     <div className="border-t border-green-200 mt-2 pt-2 flex justify-between font-black text-green-800">
                       <span>Total</span>
                       <span>KES {totalVal.toLocaleString()}</span>
                     </div>
 
-                    {/* NEW BUTTON */}
                     {h.status === 'paid' && (
                       <button
                         onClick={() => navigate(`/farmer/harvest/${h.id}/invoice`)}

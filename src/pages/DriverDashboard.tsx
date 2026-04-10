@@ -6,6 +6,13 @@ import api from '../lib/api'
 export default function DriverDashboard() {
   const navigate = useNavigate()
   const { driver, roles, logout, setActiveRole } = useMobileStore()
+
+  // In the component body, add BEFORE useEffect:
+  if (!driver) {
+    navigate('/login')
+    return null
+  }
+
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState('')
