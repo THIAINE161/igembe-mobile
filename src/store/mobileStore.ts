@@ -6,12 +6,13 @@ interface MobileState {
   roles: string[]
   activeRole: string | null
   member: any | null
+  agent: any | null
   driver: any | null
   isAuthenticated: boolean
-  login: (token: string, member: any, driver: any, roles: string[]) => void
+  login: (token: string, member: any, agent: any, roles: string[]) => void
   setActiveRole: (role: string) => void
   updateMember: (member: any) => void
-  updateDriver: (driver: any) => void
+  updateAgent: (agent: any) => void
   logout: () => void
 }
 
@@ -22,27 +23,33 @@ export const useMobileStore = create<MobileState>()(
       roles: [],
       activeRole: null,
       member: null,
+      agent: null,
       driver: null,
       isAuthenticated: false,
-      login: (token, member, driver, roles) => {
+
+      login: (token, member, agent, roles) => {
         localStorage.setItem('mobile_token', token)
         set({
           token,
           member,
-          driver,
+          agent,
+          driver: agent,
           roles,
           activeRole: roles[0],
           isAuthenticated: true
         })
       },
+
       setActiveRole: (role) => set({ activeRole: role }),
       updateMember: (member) => set({ member }),
-      updateDriver: (driver) => set({ driver }),
+      updateAgent: (agent) => set({ agent, driver: agent }),
+
       logout: () => {
         localStorage.removeItem('mobile_token')
         set({
           token: null,
           member: null,
+          agent: null,
           driver: null,
           roles: [],
           activeRole: null,

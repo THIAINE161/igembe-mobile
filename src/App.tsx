@@ -5,14 +5,14 @@ import MobileLoginPage from './pages/MobileLoginPage'
 import ForgotPinPage from './pages/ForgotPinPage'
 import RoleSelectPage from './pages/RoleSelectPage'
 import FarmerDashboard from './pages/FarmerDashboard'
-import DriverDashboard from './pages/DriverDashboard'
+import AgentDashboard from './pages/AgentDashboard'
 import NewHarvestMobilePage from './pages/NewHarvestMobilePage'
 import ProfilePage from './pages/ProfilePage'
 import AgrovetOrderPage from './pages/AgrovetOrderPage'
 import HarvestInvoiceMobilePage from './pages/HarvestInvoiceMobilePage'
 import MpesaPaymentPage from './pages/MpesaPaymentPage'
 
-class ErrorBoundary extends Component<
+class ErrorBoundary extends Component
   { children: ReactNode },
   { hasError: boolean; error: string }
 > {
@@ -30,10 +30,15 @@ class ErrorBoundary extends Component<
           <div className="bg-white rounded-3xl p-8 shadow-sm text-center max-w-sm w-full">
             <p className="text-5xl mb-4">⚠️</p>
             <h2 className="text-xl font-black text-gray-900 mb-2">Something went wrong</h2>
-            <p className="text-gray-500 text-sm mb-2 font-mono text-xs bg-gray-100 p-2 rounded">{this.state.error}</p>
+            <p className="text-gray-400 text-xs mb-6 font-mono bg-gray-100 p-2 rounded">
+              {this.state.error}
+            </p>
             <button
-              onClick={() => { this.setState({ hasError: false, error: '' }); window.location.href = '/login' }}
-              className="w-full bg-green-600 text-white font-bold py-3 rounded-2xl mt-4"
+              onClick={() => {
+                this.setState({ hasError: false, error: '' })
+                window.location.href = '/login'
+              }}
+              className="w-full bg-green-600 text-white font-bold py-3 rounded-2xl"
             >
               Go Back to Login
             </button>
@@ -55,6 +60,7 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
+          {/* Auth */}
           <Route path="/login" element={<MobileLoginPage />} />
           <Route path="/forgot-pin" element={<ForgotPinPage />} />
           <Route path="/select-role" element={<ProtectedRoute><RoleSelectPage /></ProtectedRoute>} />
@@ -67,9 +73,13 @@ function App() {
           <Route path="/farmer/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/farmer/mpesa/:type" element={<ProtectedRoute><MpesaPaymentPage /></ProtectedRoute>} />
 
-          {/* Driver routes */}
-          <Route path="/driver" element={<ProtectedRoute><ErrorBoundary><DriverDashboard /></ErrorBoundary></ProtectedRoute>} />
-          <Route path="/driver/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          {/* Agent routes — replaces driver */}
+          <Route path="/agent" element={<ProtectedRoute><ErrorBoundary><AgentDashboard /></ErrorBoundary></ProtectedRoute>} />
+          <Route path="/agent/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+
+          {/* Legacy driver route — redirect to agent */}
+          <Route path="/driver" element={<Navigate to="/agent" replace />} />
+          <Route path="/driver/profile" element={<Navigate to="/agent/profile" replace />} />
 
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
