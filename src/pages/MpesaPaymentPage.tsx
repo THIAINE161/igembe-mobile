@@ -18,49 +18,73 @@ export default function MpesaPaymentPage() {
   const isWithdraw = type === 'withdraw'
   const isRepay = type === 'repay'
 
-  const getTitle = () => {
-    if (isDeposit) return 'Deposit to Savings'
-    if (isWithdraw) return 'Withdraw from Savings'
-    if (isRepay) return 'Repay Loan via M-Pesa'
-    return 'M-Pesa Payment'
+  const config = {
+    deposit: {
+      title: 'Deposit Savings',
+      desc: 'An M-Pesa prompt will be sent to your phone.',
+      color: 'from-green-800 to-green-600',
+      btnColor: 'bg-green-600',
+      icon: '📥',
+      successIcon: '📱',
+      successTitle: 'Check Your Phone!',
+      successDesc: 'Enter your M-Pesa PIN to complete the deposit.',
+      btnText: 'Send M-Pesa Prompt'
+    },
+    withdraw: {
+      title: 'Withdraw Savings',
+      desc: 'Money will be sent to your M-Pesa within minutes.',
+      color: 'from-blue-800 to-blue-600',
+      btnColor: 'bg-blue-600',
+      icon: '💸',
+      successIcon: '💸',
+      successTitle: 'Withdrawal Initiated!',
+      successDesc: 'Money will arrive on your M-Pesa shortly.',
+      btnText: 'Withdraw Now'
+    },
+    repay: {
+      title: 'Loan Repayment',
+      desc: 'An M-Pesa prompt will be sent to complete repayment.',
+      color: 'from-purple-800 to-purple-600',
+      btnColor: 'bg-purple-600',
+      icon: '💰',
+      successIcon: '✅',
+      successTitle: 'Check Your Phone!',
+      successDesc: 'Enter your M-Pesa PIN to complete the repayment.',
+      btnText: 'Send M-Pesa Prompt'
+    }
   }
 
-  const getDescription = () => {
-    if (isDeposit) return 'You will receive an M-Pesa prompt on your phone to complete the deposit.'
-    if (isWithdraw) return 'Money will be sent to your M-Pesa number within minutes.'
-    if (isRepay) return 'You will receive an M-Pesa prompt to complete your loan repayment.'
-    return ''
-  }
+  const current = config[type as keyof typeof config] || config.deposit
+  const transactionFee = amount ? Math.ceil(Number(amount) * 0.01) : 0
+  const finalAmount = amount
+    ? isWithdraw
+      ? Number(amount) - transactionFee
+      : Number(amount) + transactionFee
+    : 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!amount || Number(amount) < 100) {
-      setError('Minimum amount is KES 100')
-      return
-    }
+    if (!amount || Number(amount) < 100) { setError('Minimum amount is KES 100'); return }
     setLoading(true)
     setError('')
-
     try {
       if (isDeposit || isRepay) {
-        // STK Push — prompts farmer's phone
         const response = await api.post('/api/mpesa/stk-push', {
           phoneNumber: phone,
-          amount: Number(amount),
+          amount: Number(amount) + transactionFee,
           accountReference: isRepay ? 'Loan Repayment' : 'Savings Deposit',
           transactionDesc: isRepay
-            ? `Loan repayment by ${member?.fullName}`
-            : `Savings deposit by ${member?.fullName}`
+            ? `Loan repayment - ${member?.memberNumber}`
+            : `Savings deposit - ${member?.memberNumber}`
         })
-        setCheckoutId(response.data.checkoutRequestId)
+        setCheckoutId(response.data.checkoutRequestId || '')
         setSuccess(true)
       } else if (isWithdraw) {
-        // B2C — send money to farmer
-        const response = await api.post('/api/mpesa/withdraw', {
+        await api.post('/api/mpesa/withdraw', {
           phoneNumber: phone,
-          amount: Number(amount),
+          amount: Number(amount) - transactionFee,
           memberId: member?.id,
-          remarks: `Savings withdrawal by ${member?.fullName}`
+          remarks: `Savings withdrawal - ${member?.memberNumber}`
         })
         setSuccess(true)
       }
@@ -72,36 +96,30 @@ export default function MpesaPaymentPage() {
   }
 
   if (success) return (
-    <div className="min-h-screen bg-green-600 flex flex-col items-center justify-center p-6 text-center">
-      <div className="text-6xl mb-6">{isWithdraw ? '💸' : '📱'}</div>
-      <h1 className="text-2xl font-black text-white mb-3">
-        {isWithdraw ? 'Withdrawal Initiated!' : 'Check Your Phone!'}
-      </h1>
-      {isDeposit || isRepay ? (
-        <>
-          <p className="text-green-100 mb-2">
-            An M-Pesa prompt has been sent to <strong>{phone}</strong>
-          </p>
-          <p className="text-green-200 text-sm mb-2">
-            Enter your M-Pesa PIN to complete the {isRepay ? 'repayment' : 'deposit'}.
-          </p>
-          <div className="bg-white bg-opacity-20 rounded-2xl p-4 mb-6">
-            <p className="text-green-100 text-xs mb-1">Checkout ID</p>
-            <p className="text-white font-mono text-sm">{checkoutId}</p>
-          </div>
-        </>
-      ) : (
-        <p className="text-green-100 mb-8">
-          KES {Number(amount).toLocaleString()} will be sent to {phone} within minutes.
-        </p>
+    <div className={`min-h-screen bg-gradient-to-br ${current.color} flex flex-col items-center justify-center p-6 text-center`}>
+      <div className="text-6xl mb-6">{current.successIcon}</div>
+      <h1 className="text-2xl font-black text-white mb-3">{current.successTitle}</h1>
+      <p className="text-white text-opacity-80 mb-2">{current.successDesc}</p>
+      {checkoutId && (
+        <div className="bg-white bg-opacity-20 rounded-2xl p-4 mb-6 w-full max-w-xs">
+          <p className="text-white text-opacity-70 text-xs mb-1">Checkout Reference</p>
+          <p className="text-white font-mono text-sm break-all">{checkoutId}</p>
+        </div>
+      )}
+      {!checkoutId && isWithdraw && (
+        <div className="bg-white bg-opacity-20 rounded-2xl p-4 mb-6">
+          <p className="text-white text-opacity-70 text-xs mb-1">Amount</p>
+          <p className="text-white font-black text-2xl">KES {finalAmount.toLocaleString()}</p>
+          <p className="text-white text-opacity-60 text-xs mt-1">Sending to {phone}</p>
+        </div>
       )}
       <div className="space-y-3 w-full max-w-xs">
         <button onClick={() => navigate('/farmer')}
-          className="w-full bg-white text-green-700 font-bold py-4 rounded-2xl text-lg">
+          className="w-full bg-white text-gray-800 font-bold py-4 rounded-2xl text-lg">
           Back to Dashboard
         </button>
         <button onClick={() => { setSuccess(false); setAmount(''); setError('') }}
-          className="w-full bg-green-700 bg-opacity-50 text-white font-bold py-3 rounded-2xl">
+          className="w-full bg-white bg-opacity-20 text-white font-bold py-3 rounded-2xl">
           Make Another Payment
         </button>
       </div>
@@ -110,24 +128,32 @@ export default function MpesaPaymentPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className={`px-5 pt-12 pb-6 ${isWithdraw ? 'bg-gradient-to-br from-blue-800 to-blue-600' : 'bg-gradient-to-br from-green-800 to-green-600'}`}>
+      {/* Header */}
+      <div className={`bg-gradient-to-br ${current.color} px-5 pt-12 pb-8`}>
         <button onClick={() => navigate('/farmer')}
           className="text-white text-opacity-70 text-sm mb-4 flex items-center gap-2">
           ← Back
         </button>
-        <h1 className="text-2xl font-black text-white">{getTitle()} 📱</h1>
-        <p className="text-white text-opacity-70 text-sm mt-1">{getDescription()}</p>
+        <div className="flex items-center gap-3">
+          <span className="text-4xl">{current.icon}</span>
+          <div>
+            <h1 className="text-2xl font-black text-white">{current.title}</h1>
+            <p className="text-white text-opacity-70 text-sm mt-0.5">{current.desc}</p>
+          </div>
+        </div>
       </div>
 
-      <div className="px-4 py-6">
+      <div className="px-4 py-6 space-y-4">
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl mb-4 text-sm">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm">
             ⚠️ {error}
+            <button onClick={() => setError('')} className="ml-2 font-bold">×</button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
                 📱 M-Pesa Phone Number
@@ -161,45 +187,37 @@ export default function MpesaPaymentPage() {
               />
               <p className="text-xs text-gray-400 mt-1">Minimum: KES 100</p>
             </div>
+          </div>
 
-            {amount && Number(amount) >= 100 && (
-              <div className={`rounded-xl p-4 ${isWithdraw ? 'bg-blue-50 border border-blue-200' : 'bg-green-50 border border-green-200'}`}>
-                <p className={`text-sm font-bold ${isWithdraw ? 'text-blue-800' : 'text-green-800'}`}>
-                  Payment Summary
-                </p>
-                <div className="flex justify-between mt-2 text-sm">
-                  <span className="text-gray-600">Amount</span>
-                  <span className="font-black">KES {Number(amount).toLocaleString()}</span>
+          {/* Payment Summary */}
+          {amount && Number(amount) >= 100 && (
+            <div className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-green-500">
+              <p className="font-black text-gray-900 mb-3">Payment Summary</p>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Amount entered</span>
+                  <span className="font-bold">KES {Number(amount).toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between mt-1 text-sm">
-                  <span className="text-gray-600">Transaction fee</span>
-                  <span className="font-medium text-orange-600">KES {Math.ceil(Number(amount) * 0.01)}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Transaction fee (1%)</span>
+                  <span className="font-bold text-orange-500">KES {transactionFee.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between mt-1 text-sm font-black border-t border-gray-200 pt-1">
-                  <span>You {isWithdraw ? 'receive' : 'pay'}</span>
-                  <span className={isWithdraw ? 'text-blue-600' : 'text-green-600'}>
-                    KES {isWithdraw
-                      ? (Number(amount) - Math.ceil(Number(amount) * 0.01)).toLocaleString()
-                      : (Number(amount) + Math.ceil(Number(amount) * 0.01)).toLocaleString()}
+                <div className="border-t border-gray-100 pt-2 flex justify-between font-black text-base">
+                  <span className="text-gray-900">
+                    You {isWithdraw ? 'receive' : 'pay total'}
+                  </span>
+                  <span className="text-green-600">
+                    KES {finalAmount.toLocaleString()}
                   </span>
                 </div>
               </div>
-            )}
-          </div>
-
-          <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4">
-            <p className="text-xs text-yellow-700">
-              ⚠️ <span className="font-bold">Note:</span> A 1% transaction fee applies to all M-Pesa transactions.
-              This supports Igembe SACCO operations.
-            </p>
-          </div>
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={loading || !amount || Number(amount) < 100}
-            className={`w-full disabled:opacity-50 text-white font-black py-5 rounded-2xl text-xl shadow-lg flex items-center justify-center gap-2 ${
-              isWithdraw ? 'bg-blue-600' : 'bg-green-600'
-            }`}
+            className={`w-full ${current.btnColor} disabled:opacity-40 text-white font-black py-5 rounded-2xl text-xl shadow-lg flex items-center justify-center gap-2`}
           >
             {loading ? (
               <>
@@ -209,9 +227,17 @@ export default function MpesaPaymentPage() {
                 </svg>
                 Processing...
               </>
-            ) : isWithdraw ? '💸 Withdraw Now' : '📱 Send M-Pesa Prompt'}
+            ) : `${current.icon} ${current.btnText}`}
           </button>
         </form>
+
+        {/* Sandbox Notice */}
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+          <p className="text-xs text-blue-700 font-bold mb-1">📋 M-Pesa Integration</p>
+          <p className="text-xs text-blue-600">
+            Currently running on M-Pesa sandbox. Real payments will be enabled once production credentials are set up.
+          </p>
+        </div>
       </div>
     </div>
   )
