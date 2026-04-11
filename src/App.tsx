@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Component, ReactNode } from 'react'
+import { Component } from 'react'
 import { useMobileStore } from './store/mobileStore'
 import MobileLoginPage from './pages/MobileLoginPage'
 import ForgotPinPage from './pages/ForgotPinPage'
@@ -12,17 +12,17 @@ import AgrovetOrderPage from './pages/AgrovetOrderPage'
 import HarvestInvoiceMobilePage from './pages/HarvestInvoiceMobilePage'
 import MpesaPaymentPage from './pages/MpesaPaymentPage'
 
-class ErrorBoundary extends Component
-  { children: ReactNode },
-  { hasError: boolean; error: string }
-> {
-  constructor(props: any) {
+// Error Boundary
+class ErrorBoundary extends Component {
+  constructor(props) {
     super(props)
     this.state = { hasError: false, error: '' }
   }
-  static getDerivedStateFromError(error: any) {
+
+  static getDerivedStateFromError(error) {
     return { hasError: true, error: error?.message || 'Unknown error' }
   }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -50,9 +50,9 @@ class ErrorBoundary extends Component
   }
 }
 
-function ProtectedRoute({ children }: { children: ReactNode }) {
+function ProtectedRoute({ children }) {
   const { isAuthenticated } = useMobileStore()
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
+  return isAuthenticated ? children : <Navigate to="/login" replace />
 }
 
 function App() {
@@ -60,27 +60,95 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          {/* Auth */}
+          {/* Auth routes */}
           <Route path="/login" element={<MobileLoginPage />} />
           <Route path="/forgot-pin" element={<ForgotPinPage />} />
-          <Route path="/select-role" element={<ProtectedRoute><RoleSelectPage /></ProtectedRoute>} />
+          <Route
+            path="/select-role"
+            element={
+              <ProtectedRoute>
+                <RoleSelectPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Farmer routes */}
-          <Route path="/farmer" element={<ProtectedRoute><ErrorBoundary><FarmerDashboard /></ErrorBoundary></ProtectedRoute>} />
-          <Route path="/farmer/harvest/new" element={<ProtectedRoute><NewHarvestMobilePage /></ProtectedRoute>} />
-          <Route path="/farmer/harvest/:id/invoice" element={<ProtectedRoute><HarvestInvoiceMobilePage /></ProtectedRoute>} />
-          <Route path="/farmer/agrovet" element={<ProtectedRoute><AgrovetOrderPage /></ProtectedRoute>} />
-          <Route path="/farmer/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-          <Route path="/farmer/mpesa/:type" element={<ProtectedRoute><MpesaPaymentPage /></ProtectedRoute>} />
+          <Route
+            path="/farmer"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary>
+                  <FarmerDashboard />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/farmer/harvest/new"
+            element={
+              <ProtectedRoute>
+                <NewHarvestMobilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/farmer/harvest/:id/invoice"
+            element={
+              <ProtectedRoute>
+                <HarvestInvoiceMobilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/farmer/agrovet"
+            element={
+              <ProtectedRoute>
+                <AgrovetOrderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/farmer/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/farmer/mpesa/:type"
+            element={
+              <ProtectedRoute>
+                <MpesaPaymentPage />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* Agent routes — replaces driver */}
-          <Route path="/agent" element={<ProtectedRoute><ErrorBoundary><AgentDashboard /></ErrorBoundary></ProtectedRoute>} />
-          <Route path="/agent/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          {/* Agent routes */}
+          <Route
+            path="/agent"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary>
+                  <AgentDashboard />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/agent/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* Legacy driver route — redirect to agent */}
+          {/* Legacy driver routes - redirect to agent */}
           <Route path="/driver" element={<Navigate to="/agent" replace />} />
           <Route path="/driver/profile" element={<Navigate to="/agent/profile" replace />} />
 
+          {/* Default */}
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
