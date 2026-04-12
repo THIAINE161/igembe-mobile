@@ -11,6 +11,7 @@ export default function MobileLoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPin, setShowPin] = useState(false)
+  const [imgLoaded, setImgLoaded] = useState(false)
   const [imgError, setImgError] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -41,13 +42,14 @@ export default function MobileLoginPage() {
     <div className="min-h-screen flex flex-col relative overflow-hidden"
       style={{ backgroundColor: '#14532d' }}>
 
-      {/* Real miraa photo background */}
+      {/* Real miraa photo — more visible */}
       {!imgError && (
         <img
           src="/miraa.jpg"
           alt="Miraa"
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ opacity: 0.2 }}
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+          style={{ opacity: imgLoaded ? 0.40 : 0 }}
+          onLoad={() => setImgLoaded(true)}
           onError={() => setImgError(true)}
         />
       )}
@@ -56,7 +58,7 @@ export default function MobileLoginPage() {
       {imgError && (
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <svg viewBox="0 0 400 700" xmlns="http://www.w3.org/2000/svg"
-            className="absolute inset-0 w-full h-full opacity-10">
+            className="absolute inset-0 w-full h-full opacity-15">
             <path d="M200 700 Q190 500 180 300 Q175 200 200 100" stroke="#4ade80" strokeWidth="6" fill="none"/>
             <path d="M200 700 Q220 500 230 300 Q240 200 220 80" stroke="#4ade80" strokeWidth="5" fill="none"/>
             <path d="M200 700 Q160 520 140 350 Q130 250 150 150" stroke="#4ade80" strokeWidth="4" fill="none"/>
@@ -65,32 +67,32 @@ export default function MobileLoginPage() {
             <ellipse cx="230" cy="260" rx="40" ry="18" fill="#16a34a" opacity="0.6" transform="rotate(25 230 260)"/>
             <ellipse cx="150" cy="200" rx="35" ry="16" fill="#22c55e" opacity="0.5" transform="rotate(-45 150 200)"/>
             <ellipse cx="250" cy="190" rx="38" ry="17" fill="#15803d" opacity="0.5" transform="rotate(40 250 190)"/>
-            <ellipse cx="180" cy="150" rx="30" ry="14" fill="#22c55e" opacity="0.4" transform="rotate(-20 180 150)"/>
-            <ellipse cx="220" cy="130" rx="32" ry="15" fill="#16a34a" opacity="0.4" transform="rotate(30 220 130)"/>
-            <ellipse cx="160" cy="350" rx="42" ry="19" fill="#22c55e" opacity="0.5" transform="rotate(-35 160 350)"/>
-            <ellipse cx="245" cy="330" rx="38" ry="17" fill="#15803d" opacity="0.5" transform="rotate(30 245 330)"/>
           </svg>
         </div>
       )}
 
-      {/* Gradient overlay bottom */}
+      {/* Lighter gradient so photo is more visible */}
       <div className="absolute inset-0 pointer-events-none"
-        style={{ background: 'linear-gradient(180deg, rgba(20,83,45,0.6) 0%, rgba(20,83,45,0.4) 50%, white 100%)' }} />
+        style={{ background: 'linear-gradient(180deg, rgba(20,83,45,0.55) 0%, rgba(20,83,45,0.35) 45%, white 100%)' }} />
 
       {/* TOP SECTION */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 pt-16 pb-8">
         <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl"
-          style={{ border: '4px solid rgba(74,222,128,0.3)' }}>
+          style={{ border: '4px solid rgba(74,222,128,0.4)' }}>
           <span className="text-green-700 text-4xl font-black">IG</span>
         </div>
         <h1 className="text-4xl font-black text-white mb-1 text-center drop-shadow-lg">
           Igembe SACCO
         </h1>
-        <p className="text-green-200 text-center drop-shadow">Member & Agent Portal</p>
-        <p className="text-green-300 text-sm text-center mt-1">🌿 Igembe South, Meru County</p>
+        <p className="text-green-100 text-center drop-shadow font-medium">
+          Member & Agent Portal
+        </p>
+        <p className="text-green-200 text-sm text-center mt-1">
+          🌿 Igembe South, Meru County
+        </p>
 
         <div className="mt-6 px-5 py-4 rounded-2xl text-center w-full max-w-xs"
-          style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>
+          style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)' }}>
           <p className="text-green-100 text-xs mb-1">📊 Live Miraa Prices</p>
           <p className="text-white text-sm font-bold">Sign in to see today's rates</p>
         </div>
@@ -145,11 +147,8 @@ export default function MobileLoginPage() {
                 inputMode="numeric"
                 className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-3xl tracking-widest text-center focus:outline-none focus:border-green-500 bg-gray-50 pr-12"
               />
-              <button
-                type="button"
-                onClick={() => setShowPin(!showPin)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
-              >
+              <button type="button" onClick={() => setShowPin(!showPin)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
                 {showPin ? '🙈' : '👁️'}
               </button>
             </div>
@@ -183,10 +182,8 @@ export default function MobileLoginPage() {
         </form>
 
         <div className="mt-5 space-y-3">
-          <button
-            onClick={() => navigate('/forgot-pin')}
-            className="w-full text-green-700 text-sm font-semibold py-3 border-2 border-green-200 rounded-xl hover:bg-green-50"
-          >
+          <button onClick={() => navigate('/forgot-pin')}
+            className="w-full text-green-700 text-sm font-semibold py-3 border-2 border-green-200 rounded-xl hover:bg-green-50">
             🔐 Forgot PIN? Reset it
           </button>
           <p className="text-center text-xs text-gray-400">
