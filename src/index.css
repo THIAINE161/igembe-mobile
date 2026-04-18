@@ -9,83 +9,111 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-html, body {
+html {
   height: 100%;
-  overflow-x: hidden;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
-  background: #f3f4f6;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  background: #f3f4f6;
+  overflow-x: hidden;
 }
 
-/* Mobile phones — full width */
-@media (max-width: 480px) {
+#root {
+  min-height: 100%;
+}
+
+/* Small phones — full width */
+@media (max-width: 390px) {
   #root {
     width: 100%;
-    min-height: 100vh;
     background: #f9fafb;
   }
 }
 
-/* Tablets — centered, comfortable width */
-@media (min-width: 481px) and (max-width: 1023px) {
+/* Normal phones — full width */
+@media (min-width: 391px) and (max-width: 767px) {
   body {
-    display: flex;
-    justify-content: center;
+    background: #f9fafb;
+  }
+  #root {
+    width: 100%;
+  }
+}
+
+/* Tablets — slightly centered, wider feel */
+@media (min-width: 768px) and (max-width: 1279px) {
+  body {
     background: #e5e7eb;
-  }
-  #root {
-    width: 100%;
-    max-width: 480px;
-    min-height: 100vh;
-    background: #f9fafb;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.12);
-  }
-}
-
-/* Desktop — show as phone frame */
-@media (min-width: 1024px) {
-  body {
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    background: #d1d5db;
-    padding: 20px 0;
   }
   #root {
-    width: 390px;
+    width: 100%;
+    max-width: 600px;
     min-height: 100vh;
     background: #f9fafb;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-    border-radius: 40px;
-    overflow: hidden;
-    position: relative;
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.10);
+  }
+  /* On tablet, fixed bottom nav stays at bottom of root */
+  .fixed.bottom-0.left-0.right-0 {
+    max-width: 600px;
+    left: 50%;
+    transform: translateX(-50%);
+    right: auto;
+    width: 600px;
   }
 }
 
-/* Fix bottom navigation on desktop */
-@media (min-width: 1024px) {
-  .fixed.bottom-0 {
-    position: absolute !important;
+/* Laptops and desktops — show as FULL WIDTH app, not phone frame */
+@media (min-width: 1280px) {
+  body {
+    background: #f9fafb;
+    display: block;
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+  }
+  /* Wider layout on desktop */
+  .farmer-content {
+    max-width: 900px;
+    margin: 0 auto;
   }
 }
 
-::-webkit-scrollbar { display: none; }
-* { scrollbar-width: none; }
+/* Scrollbar hidden everywhere */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
 
-input, button, select, textarea {
+/* Better touch targets */
+button {
+  min-height: 36px;
+  cursor: pointer;
+}
+
+/* Input improvements */
+input, select, textarea {
   font-family: inherit;
   -webkit-appearance: none;
+  appearance: none;
 }
 
-/* Smooth transitions */
-button {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+/* Smooth animations */
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
 }
-button:active {
-  opacity: 0.85;
-  transform: scale(0.97);
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms ease, transform 200ms ease;
 }
