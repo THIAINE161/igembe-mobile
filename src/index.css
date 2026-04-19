@@ -2,118 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
+*, *::before, *::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
 }
 
-html {
+html, body {
   height: 100%;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* ALL screen sizes — full width, no phone frame */
 body {
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  background: #f3f4f6;
-  overflow-x: hidden;
+  background: #f9fafb;
 }
 
 #root {
   min-height: 100%;
+  width: 100%;
+  background: #f9fafb;
 }
 
-/* Small phones — full width */
-@media (max-width: 390px) {
-  #root {
-    width: 100%;
-    background: #f9fafb;
-  }
+/* Scrollbar hidden */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; }
+
+/* Better touch targets on mobile */
+@media (max-width: 767px) {
+  button { min-height: 44px; }
 }
 
-/* Normal phones — full width */
-@media (min-width: 391px) and (max-width: 767px) {
-  body {
-    background: #f9fafb;
-  }
-  #root {
-    width: 100%;
-  }
-}
-
-/* Tablets — slightly centered, wider feel */
+/* Tablet — slightly narrower content but still full bg */
 @media (min-width: 768px) and (max-width: 1279px) {
-  body {
-    background: #e5e7eb;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-  }
-  #root {
-    width: 100%;
+  .mobile-content {
     max-width: 600px;
-    min-height: 100vh;
-    background: #f9fafb;
-    box-shadow: 0 0 60px rgba(0, 0, 0, 0.10);
-  }
-  /* On tablet, fixed bottom nav stays at bottom of root */
-  .fixed.bottom-0.left-0.right-0 {
-    max-width: 600px;
-    left: 50%;
-    transform: translateX(-50%);
-    right: auto;
-    width: 600px;
-  }
-}
-
-/* Laptops and desktops — show as FULL WIDTH app, not phone frame */
-@media (min-width: 1280px) {
-  body {
-    background: #f9fafb;
-    display: block;
-  }
-  #root {
-    width: 100%;
-    max-width: 100%;
-  }
-  /* Wider layout on desktop */
-  .farmer-content {
-    max-width: 900px;
     margin: 0 auto;
   }
+  .fixed.bottom-0 {
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    max-width: 600px;
+  }
 }
 
-/* Scrollbar hidden everywhere */
-* {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-*::-webkit-scrollbar {
-  display: none;
+/* Desktop — content is wider, login is split screen */
+@media (min-width: 1280px) {
+  .mobile-content {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .fixed.bottom-0 {
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    max-width: 800px;
+  }
 }
 
-/* Better touch targets */
-button {
-  min-height: 36px;
-  cursor: pointer;
-}
-
-/* Input improvements */
-input, select, textarea {
+input, button, select, textarea {
   font-family: inherit;
   -webkit-appearance: none;
   appearance: none;
 }
 
-/* Smooth animations */
-.page-enter {
-  opacity: 0;
-  transform: translateY(8px);
+button {
+  cursor: pointer;
+  transition: opacity 0.1s ease, transform 0.1s ease;
 }
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 200ms ease, transform 200ms ease;
-}
+button:active { opacity: 0.85; transform: scale(0.97); }
