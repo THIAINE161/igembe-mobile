@@ -16,13 +16,13 @@ import MpesaPaymentPage from './pages/MpesaPaymentPage'
 import NotificationsPage from './pages/NotificationsPage'
 
 // ================= ERROR BOUNDARY =================
-class ErrorBoundary extends Component {
-  constructor(props) {
+class ErrorBoundary extends Component<any, { hasError: boolean; error: string }> {
+  constructor(props: any) {
     super(props)
     this.state = { hasError: false, error: '' }
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: any) {
     return { hasError: true, error: error?.message || 'Unknown error' }
   }
 
@@ -60,7 +60,7 @@ class ErrorBoundary extends Component {
 }
 
 // ================= PROTECTED ROUTE =================
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useMobileStore()
   return isAuthenticated ? children : <Navigate to="/login" replace />
 }
@@ -106,6 +106,7 @@ function App() {
             }
           />
 
+          {/* ✅ INVOICE ROUTE (CONFIRMED CORRECT) */}
           <Route
             path="/farmer/harvest/:id/invoice"
             element={
