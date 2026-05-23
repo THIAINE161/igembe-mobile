@@ -14,6 +14,7 @@ import AgrovetOrderPage from './pages/AgrovetOrderPage'
 import HarvestInvoiceMobilePage from './pages/HarvestInvoiceMobilePage'
 import MpesaPaymentPage from './pages/MpesaPaymentPage'
 import NotificationsPage from './pages/NotificationsPage'
+import FarmerAnalyticsPage from './pages/FarmerAnalyticsPage'
 
 // ================= ERROR BOUNDARY =================
 class ErrorBoundary extends Component<any, { hasError: boolean; error: string }> {
@@ -148,6 +149,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/farmer/analytics"
+            element={
+              <ProtectedRoute>
+                <FarmerAnalyticsPage />
               </ProtectedRoute>
             }
           />

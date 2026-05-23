@@ -441,6 +441,7 @@ export default function FarmerDashboard() {
             <QuickBtn emoji="🌿" label="Harvests" color="bg-teal-50 border-teal-200"   onClick={() => setActiveTab('harvests')} />
             <QuickBtn emoji="🌱" label="AgroVet"  color="bg-emerald-50 border-emerald-200" onClick={() => navigate('/farmer/agrovet')} />
             <QuickBtn emoji="💰" label="Loans"    color="bg-purple-50 border-purple-200"   onClick={() => setActiveTab('loans')} />
+              <QuickBtn emoji="📊" label="Analytics" color="bg-teal-50 border-teal-200" onClick={() => navigate('/farmer/analytics')} />
           </div>
         </div>
 

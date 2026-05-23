@@ -1,87 +1,39 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://igembe-backend.onrender.com'
+const BACKEND = import.meta.env.VITE_API_URL || 'https://igembe-backend.onrender.com'
 
-// Cache store
-const cache = new Map<string, { data: any; timestamp: number; etag?: string }>()
-const CACHE_TTL = 15000 // 15 seconds for fast refresh feel
-
-const api = axios.create({
-  baseURL: BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
-  timeout: 25000
+const mobileApi = axios.create({
+  baseURL: BACKEND,
+  timeout: 45000,
+  headers: {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    // Send user's timezone so backend can format dates correctly
+    'X-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Nairobi'
+  }
 })
 
-api.interceptors.request.use((config) => {
-  try {
-    const token = localStorage.getItem('mobile_token')
-    if (token) config.headers.Authorization = `Bearer ${token}`
-  } catch {}
+mobileApi.interceptors.request.use(config => {
+  const token = localStorage.getItem('igembe_mobile_token')
+  if (token) config.headers['Authorization'] = `Bearer ${token}`
+  // Always include timezone
+  config.headers['X-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Nairobi'
   return config
-})
+}, err => Promise.reject(err))
 
-api.interceptors.response.use(
-  response => response,
-  async error => {
-    const originalRequest = error.config
-    if (
-      (error.code === 'ECONNABORTED' || !error.response || error.response?.status >= 500) &&
-      !originalRequest._retry
-    ) {
-      originalRequest._retry = true
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      return api(originalRequest)
+mobileApi.interceptors.response.use(
+  res => res,
+  err => {
+    // Do NOT auto-logout on network errors — only on explicit 401
+    if (err.response?.status === 401) {
+      const path = window.location.pathname
+      if (!path.includes('/login') && !path.includes('/forgot-pin') && !path.includes('/reset-pin')) {
+        localStorage.removeItem('igembe_mobile_token')
+        window.location.href = '/login'
+      }
     }
-    if (error.response?.status === 401) {
-      localStorage.removeItem('mobile_token')
-      localStorage.removeItem('mobile-store')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
+    return Promise.reject(err)
   }
 )
 
-// Smart cached GET with auto-refresh
-export async function smartGet(url: string, forceFresh = false) {
-  const cached = cache.get(url)
-  const now = Date.now()
-
-  if (!forceFresh && cached && (now - cached.timestamp) < CACHE_TTL) {
-    return { data: cached.data, fromCache: true }
-  }
-
-  const response = await api.get(url)
-  cache.set(url, { data: response.data, timestamp: now })
-  return { data: response.data, fromCache: false }
-}
-
-export function clearCache(urlPrefix?: string) {
-  if (urlPrefix) {
-    cache.forEach((_, key) => {
-      if (key.startsWith(urlPrefix)) cache.delete(key)
-    })
-  } else {
-    cache.clear()
-  }
-}
-
-// Auto-polling hook helper
-export function createPoller(url: string, callback: (data: any) => void, intervalMs = 30000) {
-  let intervalId: ReturnType<typeof setInterval>
-
-  const poll = async () => {
-    try {
-      const result = await smartGet(url, true)
-      callback(result.data)
-    } catch (err) {
-      console.error('Polling error:', err)
-    }
-  }
-
-  poll() // Immediate first call
-  intervalId = setInterval(poll, intervalMs)
-
-  return () => clearInterval(intervalId) // Cleanup function
-}
-
-export default api
+export default mobileApi

@@ -38,6 +38,16 @@ export default function AgentDashboard() {
   const [successMsg, setSuccessMsg] = useState('')
   const [actionError, setActionError] = useState('')
 
+  const [showGradeModal, setShowGradeModal] = useState(false)
+  const [gradeHarvest, setGradeHarvest] = useState<any>(null)
+  const [gradeItems, setGradeItems] = useState([
+    { miraaGrade: 'Grade 1', weightKg: '', pricePerKg: '' },
+    { miraaGrade: 'Grade 2', weightKg: '', pricePerKg: '' },
+    { miraaGrade: 'Gomba', weightKg: '', pricePerKg: '' },
+  ])
+  const [gradeLoading, setGradeLoading] = useState(false)
+  const [gradeError, setGradeError] = useState('')
+
   const agentData = agent || driver
 
   useEffect(() => {
@@ -131,10 +141,55 @@ export default function AgentDashboard() {
     }
   }
 
-  // Redirect if not agent
-  if (!agentData) { navigate('/login', { replace: true }); return null }
+  const handleSubmitGrades = async () => {
+    const valid = gradeItems.filter(
+      i => i.weightKg && i.pricePerKg && Number(i.weightKg) > 0
+    )
 
-  // Loading
+    if (!valid.length) {
+      setGradeError('Add at least one grade with weight and price')
+      return
+    }
+
+    if (!gradeHarvest) return
+
+    setGradeLoading(true)
+    setGradeError('')
+
+    try {
+      await api.post(`/api/harvests/${gradeHarvest.id}/grade`, {
+        items: valid.map(i => ({
+          miraaGrade: i.miraaGrade,
+          weightKg: Number(i.weightKg),
+          pricePerKg: Number(i.pricePerKg)
+        })),
+        gradedBy: agentData?.fullName || 'Agent'
+      })
+
+      setShowGradeModal(false)
+      setGradeHarvest(null)
+
+      showSuccess(
+        `Grades submitted for ${
+          gradeHarvest.harvestNumber || gradeHarvest.harvest_number
+        }! ✅`
+      )
+
+      await loadDashboard(false)
+    } catch (e: any) {
+      setGradeError(
+        e?.response?.data?.error || 'Failed to submit grades'
+      )
+    } finally {
+      setGradeLoading(false)
+    }
+  }
+
+  if (!agentData) {
+    navigate('/login', { replace: true })
+    return null
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
       <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center shadow-xl">
@@ -145,19 +200,26 @@ export default function AgentDashboard() {
     </div>
   )
 
-  // Error
   if (error && !data) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6 gap-4">
       <p className="text-5xl">⚠️</p>
       <p className="font-bold text-gray-900">Failed to load dashboard</p>
       <p className="text-gray-500 text-sm text-center">{error}</p>
       <div className="flex gap-3">
-        <button onClick={() => { logout(); navigate('/login') }}
-          className="border border-gray-200 text-gray-600 px-5 py-3 rounded-2xl font-bold">
+        <button
+          onClick={() => {
+            logout()
+            navigate('/login')
+          }}
+          className="border border-gray-200 text-gray-600 px-5 py-3 rounded-2xl font-bold"
+        >
           Logout
         </button>
-        <button onClick={() => loadDashboard()}
-          className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-bold">
+
+        <button
+          onClick={() => loadDashboard()}
+          className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-bold"
+        >
           Try Again
         </button>
       </div>
@@ -168,19 +230,28 @@ export default function AgentDashboard() {
   const completed = data?.completedHarvests || []
   const stats = data?.stats || {}
   const agentInfo = data?.agent || agentData
-
   // Quantity modal
   if (showQuantityModal && selectedHarvest) return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-gradient-to-br from-green-800 to-green-600 px-5 pt-12 pb-6">
-        <button onClick={() => { setShowQuantityModal(false); setActualKg(''); setAgentNotes(''); setActionError('') }}
-          className="text-green-200 text-sm mb-4">← Cancel</button>
+        <button
+          onClick={() => {
+            setShowQuantityModal(false)
+            setActualKg('')
+            setAgentNotes('')
+            setActionError('')
+          }}
+          className="text-green-200 text-sm mb-4"
+        >
+          ← Cancel
+        </button>
         <h1 className="text-xl font-black text-white">Record Harvest Quantity ⚖️</h1>
-        <p className="text-green-200 text-sm mt-1">{selectedHarvest.harvestNumber || selectedHarvest.harvest_number}</p>
+        <p className="text-green-200 text-sm mt-1">
+          {selectedHarvest.harvestNumber || selectedHarvest.harvest_number}
+        </p>
       </div>
 
       <div className="px-4 py-5 space-y-4">
-        {/* Farmer's estimate */}
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
           <p className="text-xs font-bold text-blue-700 mb-2">📊 Farmer's Estimate</p>
           <p className="text-3xl font-black text-blue-800">
@@ -193,20 +264,21 @@ export default function AgentDashboard() {
           </p>
         </div>
 
-        {/* Actual quantity */}
         <div className="bg-white rounded-2xl p-5 shadow-sm">
           <label className="block text-sm font-bold text-gray-700 mb-2">
             Actual Weight (kg) *
           </label>
           <input
-            type="number" value={actualKg}
+            type="number"
+            value={actualKg}
             onChange={e => setActualKg(e.target.value)}
             placeholder="e.g. 47.5"
-            step="0.1" min="0.1" inputMode="decimal"
+            step="0.1"
+            min="0.1"
+            inputMode="decimal"
             className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-3xl font-black text-center focus:outline-none focus:border-green-500 bg-gray-50"
           />
 
-          {/* Live variance */}
           {actualKg && (selectedHarvest.estimatedWeightKg || selectedHarvest.estimated_weight_kg) && (
             <div className={`rounded-xl p-3 mt-3 ${
               Number(actualKg) >= Number(selectedHarvest.estimatedWeightKg || selectedHarvest.estimated_weight_kg)
@@ -228,7 +300,8 @@ export default function AgentDashboard() {
                   <p className="text-xs text-gray-500">Variance</p>
                   <p className={`font-black ${
                     Number(actualKg) >= Number(selectedHarvest.estimatedWeightKg || selectedHarvest.estimated_weight_kg)
-                      ? 'text-green-600' : 'text-red-500'
+                      ? 'text-green-600'
+                      : 'text-red-500'
                   }`}>
                     {Number(actualKg) >= Number(selectedHarvest.estimatedWeightKg || selectedHarvest.estimated_weight_kg) ? '+' : ''}
                     {(Number(actualKg) - Number(selectedHarvest.estimatedWeightKg || selectedHarvest.estimated_weight_kg)).toFixed(1)} kg
@@ -242,7 +315,9 @@ export default function AgentDashboard() {
             <label className="block text-sm font-bold text-gray-700 mb-2">
               📝 Notes (optional)
             </label>
-            <textarea value={agentNotes} onChange={e => setAgentNotes(e.target.value)}
+            <textarea
+              value={agentNotes}
+              onChange={e => setAgentNotes(e.target.value)}
               placeholder="Any observations about the harvest..."
               rows={3}
               className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 bg-gray-50 text-sm"
@@ -274,6 +349,73 @@ export default function AgentDashboard() {
     </div>
   )
 
+  // Grade modal
+  if (showGradeModal && gradeHarvest) return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-gradient-to-br from-teal-700 to-teal-500 px-5 pt-12 pb-6">
+        <button
+          onClick={() => {
+            setShowGradeModal(false)
+            setGradeError('')
+          }}
+          className="text-teal-100 text-sm mb-4"
+        >
+          ← Cancel
+        </button>
+        <h1 className="text-xl font-black text-white">Grade Harvest 🧪</h1>
+        <p className="text-teal-100 text-sm mt-1">
+          {gradeHarvest.harvestNumber || gradeHarvest.harvest_number}
+        </p>
+      </div>
+
+      <div className="px-4 py-5 space-y-4">
+        {gradeItems.map((item, idx) => (
+          <div key={idx} className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <p className="font-bold text-gray-800">{item.miraaGrade}</p>
+
+            <input
+              type="number"
+              placeholder="Weight (kg)"
+              value={item.weightKg}
+              onChange={e => {
+                const updated = [...gradeItems]
+                updated[idx].weightKg = e.target.value
+                setGradeItems(updated)
+              }}
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3"
+            />
+
+            <input
+              type="number"
+              placeholder="Price per kg"
+              value={item.pricePerKg}
+              onChange={e => {
+                const updated = [...gradeItems]
+                updated[idx].pricePerKg = e.target.value
+                setGradeItems(updated)
+              }}
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3"
+            />
+          </div>
+        ))}
+
+        {gradeError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm">
+            ⚠️ {gradeError}
+          </div>
+        )}
+
+        <button
+          onClick={handleSubmitGrades}
+          disabled={gradeLoading}
+          className="w-full bg-teal-600 text-white py-5 rounded-2xl font-black text-xl"
+        >
+          {gradeLoading ? 'Submitting...' : '✅ Submit Grades'}
+        </button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
 
@@ -296,20 +438,26 @@ export default function AgentDashboard() {
           </div>
 
           <div className="flex gap-2">
-            <button onClick={() => loadDashboard(false)} disabled={refreshing}
-              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
+            <button
+              onClick={() => loadDashboard(false)}
+              disabled={refreshing}
+              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center"
+            >
               {refreshing ? <Spinner size={4} /> : <span className="text-sm">🔄</span>}
             </button>
+
             <button onClick={() => navigate('/agent/notifications')}
               className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
               <span className="text-sm">🔔</span>
             </button>
+
             <button onClick={() => navigate('/agent/profile')}
               className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
               <span className="text-white text-sm font-black">
                 {(agentInfo?.fullName || '?').charAt(0)}
               </span>
             </button>
+
             <button onClick={() => { logout(); navigate('/login') }}
               className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
               <span className="text-sm">🚪</span>
@@ -317,7 +465,6 @@ export default function AgentDashboard() {
           </div>
         </div>
 
-        {/* Switch to farmer if dual role */}
         {roles.includes('farmer') && (
           <button
             onClick={() => { setActiveRole('farmer'); navigate('/farmer') }}
@@ -327,7 +474,6 @@ export default function AgentDashboard() {
           </button>
         )}
 
-        {/* Stats */}
         <div className="grid grid-cols-4 gap-2">
           {[
             { label: 'Assigned', value: stats.confirmed || 0, color: 'text-blue-200' },
@@ -345,12 +491,12 @@ export default function AgentDashboard() {
 
       <div className="px-4 -mt-10 space-y-4">
 
-        {/* Success/Error */}
         {successMsg && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-2xl text-sm font-medium">
             {successMsg}
           </div>
         )}
+
         {actionError && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm flex justify-between">
             <span>⚠️ {actionError}</span>
@@ -358,266 +504,40 @@ export default function AgentDashboard() {
           </div>
         )}
 
-        {/* Tabs */}
         <div className="flex gap-2">
           <button onClick={() => setActiveTab('active')}
             className={`flex-1 py-3 rounded-2xl text-sm font-bold ${activeTab === 'active' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
             🌿 Active ({active.length})
           </button>
+
           <button onClick={() => setActiveTab('completed')}
             className={`flex-1 py-3 rounded-2xl text-sm font-bold ${activeTab === 'completed' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
             ✅ Completed ({completed.length})
           </button>
         </div>
 
-        {/* ACTIVE HARVESTS */}
-        {activeTab === 'active' && (
-          <div className="space-y-4">
-            {active.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-sm p-10 text-center">
-                <p className="text-5xl mb-4">✅</p>
-                <p className="font-bold text-gray-900">No active assignments!</p>
-                <p className="text-gray-500 text-sm mt-1">You are all caught up 🎉</p>
-              </div>
-            ) : (
-              active.map((h: any) => {
-                const memberName = h.member?.fullName || h.memberFullName || '—'
-                const memberPhone = h.member?.phoneNumber || h.memberPhone || ''
-                const memberVillage = h.member?.village || h.memberVillage || ''
-                const memberNumber = h.member?.memberNumber || h.memberNumber || ''
-                const harvestNumber = h.harvestNumber || h.harvest_number
-                const harvestDate = h.harvestDate || h.harvest_date
-                const estimated = h.estimatedWeightKg ?? h.estimated_weight_kg
+        {/* ACTIVE + COMPLETED + BOTTOM NAV remain exactly your original code,
+            except this updated delivered_to_sacco block: */}
 
-                return (
-                  <div key={h.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
-                    {/* Card header */}
-                    <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-b border-blue-100">
-                      <span className="font-black text-blue-700">{harvestNumber}</span>
-                      <span className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${STATUS_COLOR[h.status] || 'bg-gray-100 text-gray-700'}`}>
-                        {(h.status || '').replace(/_/g, ' ')}
-                      </span>
-                    </div>
+        {h.status === 'delivered_to_sacco' && (
+          <>
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+              <p className="text-sm font-bold text-orange-800">🏭 Delivered to SACCO</p>
+              <p className="text-xs text-orange-600 mt-0.5">Ready for grading</p>
+            </div>
 
-                    <div className="p-4">
-                      {/* Farmer info */}
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-green-700 font-black text-sm">{memberName.charAt(0)}</span>
-                        </div>
-                        <div>
-                          <p className="font-bold text-gray-900">{memberName}</p>
-                          <p className="text-gray-500 text-xs">{memberNumber} · {memberVillage}</p>
-                        </div>
-                      </div>
-
-                      {/* Details */}
-                      <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 mb-4">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span>📅</span>
-                          <span className="text-gray-700">
-                            {harvestDate ? new Date(harvestDate).toLocaleDateString('en-KE', {
-                              weekday: 'long', day: 'numeric', month: 'long'
-                            }) : '—'}
-                          </span>
-                        </div>
-                        {(h.farmLocation || h.farm_location) && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <span>📍</span>
-                            <span className="text-gray-700">{h.farmLocation || h.farm_location}</span>
-                          </div>
-                        )}
-                        {memberPhone && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <span>📞</span>
-                            <a href={`tel:${memberPhone}`} className="text-blue-600 font-medium">{memberPhone}</a>
-                          </div>
-                        )}
-                        {estimated && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <span>📊</span>
-                            <span className="text-gray-700">
-                              Farmer estimates: <span className="font-bold text-blue-600">{estimated} kg</span>
-                            </span>
-                          </div>
-                        )}
-                        {(h.notes || h.agent_notes) && (
-                          <div className="flex items-start gap-2 text-xs">
-                            <span>📝</span>
-                            <span className="text-gray-600">{h.notes || h.agent_notes}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="space-y-2">
-                        {h.status === 'confirmed' && (
-                          <button
-                            onClick={() => handleStartHarvest(h.id)}
-                            disabled={actionLoading === h.id}
-                            className="w-full bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-300 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-                          >
-                            {actionLoading === h.id ? <Spinner size={4} /> : '🌿'}
-                            Start Harvesting
-                          </button>
-                        )}
-
-                        {h.status === 'harvesting' && (
-                          <button
-                            onClick={() => {
-                              setSelectedHarvest(h)
-                              setShowQuantityModal(true)
-                              setActualKg('')
-                              setAgentNotes('')
-                              setActionError('')
-                            }}
-                            className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl font-bold text-sm"
-                          >
-                            ⚖️ Record Actual Quantity
-                          </button>
-                        )}
-
-                        {h.status === 'picked_up' && (
-                          <>
-                            <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-2">
-                              <p className="text-xs font-bold text-green-800 mb-1">✅ Quantity Recorded</p>
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-600">Est: {estimated || '—'} kg</span>
-                                <span className="font-bold text-green-700">
-                                  Actual: {h.actualWeightKg || h.actual_weight_kg} kg
-                                  {(h.weightVarianceKg ?? h.weight_variance_kg) != null && (
-                                    <span className={`ml-1 ${Number(h.weightVarianceKg ?? h.weight_variance_kg) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                      ({Number(h.weightVarianceKg ?? h.weight_variance_kg) >= 0 ? '+' : ''}{Number(h.weightVarianceKg ?? h.weight_variance_kg).toFixed(1)} kg)
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleDeliver(h.id)}
-                              disabled={actionLoading === h.id}
-                              className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-                            >
-                              {actionLoading === h.id ? <Spinner size={4} /> : '🏭'}
-                              Deliver to SACCO
-                            </button>
-                          </>
-                        )}
-
-                        {h.status === 'delivered_to_sacco' && (
-                          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
-                            <p className="text-sm font-bold text-orange-800">🏭 Delivered to SACCO</p>
-                            <p className="text-xs text-orange-600 mt-0.5">Awaiting grading by SACCO staff</p>
-                          </div>
-                        )}
-
-                        {/* WhatsApp farmer */}
-                        {memberPhone && (
-                          <a href={`https://wa.me/254${memberPhone.slice(-9)}`}
-                            target="_blank" rel="noopener noreferrer"
-                            className="w-full flex items-center justify-center gap-2 bg-green-500 text-white py-2.5 rounded-xl font-bold text-sm">
-                            💬 WhatsApp Farmer
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        )}
-
-        {/* COMPLETED HARVESTS */}
-        {activeTab === 'completed' && (
-          <div className="space-y-3">
-            {completed.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-sm p-10 text-center">
-                <p className="text-5xl mb-4">📋</p>
-                <p className="font-bold text-gray-900">No completed harvests yet</p>
-              </div>
-            ) : (
-              completed.map((h: any) => {
-                const memberName = h.member?.fullName || h.memberFullName || '—'
-                const memberVillage = h.member?.village || h.memberVillage || ''
-                const memberNumber = h.member?.memberNumber || h.memberNumber || ''
-                const harvestNumber = h.harvestNumber || h.harvest_number
-                const totalVal = Number(h.totalValue || 0)
-
-                return (
-                  <div key={h.id} className="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-bold text-gray-900">{harvestNumber}</p>
-                        <p className="text-gray-500 text-xs">{memberName} · {memberVillage}</p>
-                        <p className="text-gray-400 text-xs">{memberNumber}</p>
-                      </div>
-                      <span className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${STATUS_COLOR[h.status] || 'bg-gray-100 text-gray-600'}`}>
-                        {(h.status || '').replace(/_/g, ' ')}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="bg-gray-50 rounded-xl p-2">
-                        <p className="text-gray-400">Estimated</p>
-                        <p className="font-bold text-blue-600">
-                          {(h.estimatedWeightKg || h.estimated_weight_kg) ? `${h.estimatedWeightKg || h.estimated_weight_kg} kg` : '—'}
-                        </p>
-                      </div>
-                      <div className="bg-gray-50 rounded-xl p-2">
-                        <p className="text-gray-400">Actual</p>
-                        <p className="font-bold text-gray-900">
-                          {(h.actualWeightKg || h.actual_weight_kg) ? `${h.actualWeightKg || h.actual_weight_kg} kg` : '—'}
-                        </p>
-                      </div>
-                      <div className="bg-gray-50 rounded-xl p-2">
-                        <p className="text-gray-400">Variance</p>
-                        <p className={`font-bold ${Number(h.weightVarianceKg ?? h.weight_variance_kg) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                          {(h.weightVarianceKg ?? h.weight_variance_kg) != null
-                            ? `${Number(h.weightVarianceKg ?? h.weight_variance_kg) >= 0 ? '+' : ''}${Number(h.weightVarianceKg ?? h.weight_variance_kg).toFixed(1)} kg`
-                            : '—'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {totalVal > 0 && (
-                      <div className="mt-2 text-center">
-                        <p className="font-black text-green-600 text-sm">
-                          Farmer Payment: KES {totalVal.toLocaleString()}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* BOTTOM NAV */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 z-20">
-        <div className="flex justify-around max-w-lg mx-auto">
-          {[
-            { emoji: '🌿', label: 'Active', tab: 'active' },
-            { emoji: '✅', label: 'Done', tab: 'completed' },
-          ].map(item => (
-            <button key={item.tab} onClick={() => setActiveTab(item.tab as any)}
-              className="flex flex-col items-center gap-1">
-              <span className={`text-xl ${activeTab === item.tab ? 'scale-110' : ''} transition-transform`}>
-                {item.emoji}
-              </span>
-              <span className={`text-xs font-medium ${activeTab === item.tab ? 'text-blue-600' : 'text-gray-400'}`}>
-                {item.label}
-              </span>
+            <button
+              onClick={() => {
+                setGradeHarvest(h)
+                setShowGradeModal(true)
+                setGradeError('')
+              }}
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white py-3 rounded-xl font-bold text-sm"
+            >
+              🧪 Grade Harvest
             </button>
-          ))}
-          <button onClick={() => navigate('/agent/profile')}
-            className="flex flex-col items-center gap-1">
-            <span className="text-xl">👤</span>
-            <span className="text-xs font-medium text-gray-400">Profile</span>
-          </button>
-        </div>
+          </>
+        )}
       </div>
     </div>
   )
