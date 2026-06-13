@@ -1,241 +1,408 @@
-import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
 
+type Stage = 'input' | 'polling' | 'success' | 'failed'
+type PayType = 'deposit' | 'withdraw' | 'repay' | 'harvest-withdraw'
+
+const TITLES: Record<PayType, string> = {
+  deposit: '📥 Deposit Savings',
+  withdraw: '💸 Withdraw Savings',
+  repay: '💰 Repay Loan',
+  'harvest-withdraw': '🌿 Harvest Earnings'
+}
+const DESCRIPTIONS: Record<PayType, string> = {
+  deposit: 'Add money to your savings account via M-Pesa.',
+  withdraw: 'Withdraw from savings to M-Pesa.',
+  repay: 'Repay your loan via M-Pesa.',
+  'harvest-withdraw': 'Withdraw harvest earnings to M-Pesa.'
+}
+
+function Spinner({ size = 5 }: { size?: number }) {
+  return (
+    <svg className={`animate-spin h-${size} w-${size} text-green-600`} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  )
+}
+
 export default function MpesaPaymentPage() {
   const navigate = useNavigate()
-  const { type } = useParams<{ type: string }>()
+  const [sp] = useSearchParams()
   const { member } = useMobileStore()
-  const [amount, setAmount] = useState('')
-  const [phone, setPhone] = useState(member?.phoneNumber || '')
+
+  const payType = (sp.get('type') || 'deposit') as PayType
+  const loanId = sp.get('loanId') || ''
+  const loanNumber = sp.get('loanNumber') || ''
+  const accountId = sp.get('accountId') || ''
+
+  const [amount, setAmount] = useState(sp.get('amount') || '')
   const [loading, setLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
-  const [checkoutId, setCheckoutId] = useState('')
+  const [stage, setStage] = useState<Stage>('input')
+  const [checkoutReqId, setCheckoutReqId] = useState('')
+  const [resultMsg, setResultMsg] = useState('')
+  const [receipt, setReceipt] = useState('')
+  const [newBalance, setNewBalance] = useState<number | null>(null)
+  const [savBalance, setSavBalance] = useState(0)
 
-  const isDeposit = type === 'deposit'
-  const isWithdraw = type === 'withdraw'
-  const isRepay = type === 'repay'
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollCount = useRef(0)
 
-  const config = {
-    deposit: {
-      title: 'Deposit Savings',
-      desc: 'An M-Pesa prompt will be sent to your phone.',
-      color: 'from-green-800 to-green-600',
-      btnColor: 'bg-green-600',
-      icon: '📥',
-      successIcon: '📱',
-      successTitle: 'Check Your Phone!',
-      successDesc: 'Enter your M-Pesa PIN to complete the deposit.',
-      btnText: 'Send M-Pesa Prompt'
-    },
-    withdraw: {
-      title: 'Withdraw Savings',
-      desc: 'Money will be sent to your M-Pesa within minutes.',
-      color: 'from-blue-800 to-blue-600',
-      btnColor: 'bg-blue-600',
-      icon: '💸',
-      successIcon: '💸',
-      successTitle: 'Withdrawal Initiated!',
-      successDesc: 'Money will arrive on your M-Pesa shortly.',
-      btnText: 'Withdraw Now'
-    },
-    repay: {
-      title: 'Loan Repayment',
-      desc: 'An M-Pesa prompt will be sent to complete repayment.',
-      color: 'from-purple-800 to-purple-600',
-      btnColor: 'bg-purple-600',
-      icon: '💰',
-      successIcon: '✅',
-      successTitle: 'Check Your Phone!',
-      successDesc: 'Enter your M-Pesa PIN to complete the repayment.',
-      btnText: 'Send M-Pesa Prompt'
+  useEffect(() => {
+    if (!member) { navigate('/login', { replace: true }); return }
+    loadBalance()
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
     }
+  }, [])
+
+  const loadBalance = async () => {
+    if (!member?.id) return
+    try {
+      const r = await api.get(`/api/mobile/farmer/${member.id}/dashboard`)
+      const accs: any[] = r.data?.data?.savingsAccounts || []
+      const sav = accs.find((a: any) => a.accountType === 'savings')
+      setSavBalance(Number(sav?.balance || 0))
+    } catch (_) {}
   }
 
-  const current = config[type as keyof typeof config] || config.deposit
-  const transactionFee = amount ? Math.ceil(Number(amount) * 0.01) : 0
-  const finalAmount = amount
-    ? isWithdraw
-      ? Number(amount) - transactionFee
-      : Number(amount) + transactionFee
-    : 0
+  const startPolling = (crid: string) => {
+    pollCount.current = 0
+    pollRef.current = setInterval(async () => {
+      pollCount.current++
+      // Stop after 2.5 minutes (30 × 5 seconds)
+      if (pollCount.current > 30) {
+        clearInterval(pollRef.current!)
+        setStage('failed')
+        setResultMsg('Payment timed out. If money was deducted from M-Pesa, it will be reversed within 24 hours.')
+        return
+      }
+      try {
+        const r = await api.get(`/api/mpesa/status/${crid}`)
+        const { status, resultCode, resultDesc, receipt: rec } = r.data
+
+        if (status === 'success') {
+          clearInterval(pollRef.current!)
+          setReceipt(rec || '')
+          setStage('success')
+          setResultMsg('Payment confirmed! ✅')
+          await loadBalance()
+        } else if (status === 'failed') {
+          clearInterval(pollRef.current!)
+          setStage('failed')
+          // Friendly messages for common M-Pesa result codes
+          const FAIL_MSGS: Record<number, string> = {
+            1: 'Insufficient M-Pesa balance.',
+            1032: 'Payment was cancelled.',
+            1037: 'Timed out — you did not enter your PIN in time.',
+            2001: 'Wrong M-Pesa PIN entered.',
+            17: 'M-Pesa limit reached. Try a smaller amount.'
+          }
+          setResultMsg(FAIL_MSGS[resultCode] || resultDesc || 'Payment failed. Please try again.')
+        }
+        // status === 'pending' → keep polling
+      } catch (_) {
+        // Network error — keep polling silently
+      }
+    }, 5000)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!amount || Number(amount) < 100) { setError('Minimum amount is KES 100'); return }
+    const amt = Number(amount)
+
+    if (!amt || amt <= 0) { setError('Enter a valid amount'); return }
+    if (!member) { setError('Please login first'); return }
+
+    // Pre-validate withdrawal amount
+    if ((payType === 'withdraw' || payType === 'harvest-withdraw') && amt > savBalance) {
+      setError(`Insufficient balance. Available: KES ${savBalance.toLocaleString()}`)
+      return
+    }
+
     setLoading(true)
     setError('')
+
     try {
-      if (isDeposit || isRepay) {
-        const response = await api.post('/api/mpesa/stk-push', {
-          phoneNumber: phone,
-          amount: Number(amount) + transactionFee,
-          accountReference: isRepay ? 'Loan Repayment' : 'Savings Deposit',
-          transactionDesc: isRepay
-            ? `Loan repayment - ${member?.memberNumber}`
-            : `Savings deposit - ${member?.memberNumber}`
+      if (payType === 'deposit') {
+        const r = await api.post('/api/mpesa/stk-push', {
+          phoneNumber: member.phoneNumber,
+          amount: amt,
+          memberId: member.id
         })
-        setCheckoutId(response.data.checkoutRequestId || '')
-        setSuccess(true)
-      } else if (isWithdraw) {
-        await api.post('/api/mpesa/withdraw', {
-          phoneNumber: phone,
-          amount: Number(amount) - transactionFee,
-          memberId: member?.id,
-          remarks: `Savings withdrawal - ${member?.memberNumber}`
+        const crid = r.data?.checkoutRequestId
+        if (crid) {
+          setCheckoutReqId(crid)
+          setStage('polling')
+          startPolling(crid)
+        } else {
+          // Sandbox or immediate response
+          setStage('success')
+          setResultMsg(r.data?.message || 'Deposit initiated. (Sandbox mode)')
+          await loadBalance()
+        }
+
+      } else if (payType === 'repay') {
+        const r = await api.post('/api/mpesa/loan-repayment', {
+          phoneNumber: member.phoneNumber,
+          amount: amt,
+          memberId: member.id,
+          loanId: loanId || undefined,
+          loanNumber: loanNumber || undefined
         })
-        setSuccess(true)
+        const crid = r.data?.checkoutRequestId
+        if (crid) {
+          setCheckoutReqId(crid)
+          setStage('polling')
+          startPolling(crid)
+        } else {
+          setStage('success')
+          setResultMsg(r.data?.message || 'Repayment initiated. (Sandbox mode)')
+        }
+
+      } else {
+        // withdraw / harvest-withdraw — no STK push, direct deduction
+        const r = await api.post('/api/mpesa/withdraw', {
+          memberId: member.id,
+          phoneNumber: member.phoneNumber,
+          amount: amt,
+          accountId: accountId || undefined
+        })
+        setNewBalance(r.data?.data?.newBalance ?? null)
+        setStage('success')
+        setResultMsg(r.data?.message || `KES ${amt.toLocaleString()} withdrawn successfully.`)
+        await loadBalance()
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Payment failed. Please try again.')
+      const msg = err.response?.data?.error || 'Request failed. Check your connection and try again.'
+      setError(msg)
     } finally {
       setLoading(false)
     }
   }
 
-  if (success) return (
-    <div className={`min-h-screen bg-gradient-to-br ${current.color} flex flex-col items-center justify-center p-6 text-center`}>
-      <div className="text-6xl mb-6">{current.successIcon}</div>
-      <h1 className="text-2xl font-black text-white mb-3">{current.successTitle}</h1>
-      <p className="text-white text-opacity-80 mb-2">{current.successDesc}</p>
-      {checkoutId && (
-        <div className="bg-white bg-opacity-20 rounded-2xl p-4 mb-6 w-full max-w-xs">
-          <p className="text-white text-opacity-70 text-xs mb-1">Checkout Reference</p>
-          <p className="text-white font-mono text-sm break-all">{checkoutId}</p>
+  // ── SUCCESS ────────────────────────────────────────────────────────────────
+  if (stage === 'success') return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+      <div className="bg-white rounded-3xl shadow-lg p-8 w-full max-w-sm text-center">
+        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <span className="text-5xl">✅</span>
         </div>
-      )}
-      {!checkoutId && isWithdraw && (
-        <div className="bg-white bg-opacity-20 rounded-2xl p-4 mb-6">
-          <p className="text-white text-opacity-70 text-xs mb-1">Amount</p>
-          <p className="text-white font-black text-2xl">KES {finalAmount.toLocaleString()}</p>
-          <p className="text-white text-opacity-60 text-xs mt-1">Sending to {phone}</p>
+        <h2 className="text-2xl font-black text-gray-900 mb-2">
+          {payType === 'withdraw' || payType === 'harvest-withdraw'
+            ? 'Withdrawal Recorded!'
+            : 'Payment Confirmed!'}
+        </h2>
+        <p className="text-gray-600 mb-2 text-sm">{resultMsg}</p>
+        {receipt && (
+          <p className="text-green-600 text-sm font-bold mb-2">M-Pesa Receipt: {receipt}</p>
+        )}
+        <div className="bg-green-50 rounded-2xl p-4 mb-5">
+          <p className="text-xs text-gray-500">Amount</p>
+          <p className="text-3xl font-black text-green-700">KES {Number(amount).toLocaleString()}</p>
+          {(payType === 'deposit' || payType === 'withdraw' || payType === 'harvest-withdraw') && (
+            <>
+              <p className="text-xs text-gray-500 mt-2">Updated Balance</p>
+              <p className="text-xl font-bold text-gray-900">
+                KES {(newBalance !== null ? newBalance : savBalance).toLocaleString()}
+              </p>
+            </>
+          )}
+          {payType === 'repay' && (
+            <p className="text-xs text-green-600 mt-2">Your loan balance has been updated.</p>
+          )}
         </div>
-      )}
-      <div className="space-y-3 w-full max-w-xs">
-        <button onClick={() => navigate('/farmer')}
-          className="w-full bg-white text-gray-800 font-bold py-4 rounded-2xl text-lg">
+        <button
+          onClick={() => navigate('/farmer')}
+          className="w-full bg-green-600 text-white font-black py-3 rounded-2xl mb-2"
+        >
           Back to Dashboard
         </button>
-        <button onClick={() => { setSuccess(false); setAmount(''); setError('') }}
-          className="w-full bg-white bg-opacity-20 text-white font-bold py-3 rounded-2xl">
+        <button
+          onClick={() => { setStage('input'); setError(''); setAmount('') }}
+          className="w-full border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl"
+        >
           Make Another Payment
         </button>
       </div>
     </div>
   )
 
+  // ── FAILED ──────────────────────────────────────────────────────────────────
+  if (stage === 'failed') return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+      <div className="bg-white rounded-3xl shadow-lg p-8 w-full max-w-sm text-center">
+        <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <span className="text-5xl">❌</span>
+        </div>
+        <h2 className="text-2xl font-black text-gray-900 mb-2">Payment Failed</h2>
+        <p className="text-gray-600 mb-6 text-sm">{resultMsg}</p>
+        <button
+          onClick={() => navigate('/farmer')}
+          className="w-full border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-2xl mb-2"
+        >
+          Back to Dashboard
+        </button>
+        <button
+          onClick={() => { setStage('input'); setError('') }}
+          className="w-full bg-green-600 text-white font-black py-3 rounded-2xl"
+        >
+          Try Again
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── POLLING ──────────────────────────────────────────────────────────────────
+  if (stage === 'polling') return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+      <div className="bg-white rounded-3xl shadow-lg p-8 w-full max-w-sm text-center">
+        <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Spinner size={10} />
+        </div>
+        <h2 className="text-xl font-black text-gray-900 mb-2">Check Your Phone! 📱</h2>
+        <p className="text-gray-600 mb-1">Enter your M-Pesa PIN to complete the payment.</p>
+        <p className="text-blue-600 text-sm font-medium mb-4">Waiting for confirmation...</p>
+        <div className="bg-blue-50 rounded-2xl p-4 mb-4">
+          <p className="text-xs text-gray-500">Amount</p>
+          <p className="text-3xl font-black text-blue-700">KES {Number(amount).toLocaleString()}</p>
+          <p className="text-xs text-gray-500 mt-1">Sending to: {member?.phoneNumber}</p>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">
+          This page updates automatically when payment is confirmed. Do not close it.
+        </p>
+        <button
+          onClick={() => {
+            if (pollRef.current) clearInterval(pollRef.current)
+            setStage('input')
+          }}
+          className="text-red-400 text-sm underline"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── INPUT FORM ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className={`bg-gradient-to-br ${current.color} px-5 pt-12 pb-8`}>
-        <button onClick={() => navigate('/farmer')}
-          className="text-white text-opacity-70 text-sm mb-4 flex items-center gap-2">
+      <div className="bg-gradient-to-br from-green-800 to-green-600 px-5 pt-12 pb-8">
+        <button onClick={() => navigate(-1)} className="text-green-200 text-sm mb-4 block">
           ← Back
         </button>
-        <div className="flex items-center gap-3">
-          <span className="text-4xl">{current.icon}</span>
-          <div>
-            <h1 className="text-2xl font-black text-white">{current.title}</h1>
-            <p className="text-white text-opacity-70 text-sm mt-0.5">{current.desc}</p>
-          </div>
-        </div>
+        <h1 className="text-white text-2xl font-black">{TITLES[payType]}</h1>
+        <p className="text-green-200 text-sm mt-1">{DESCRIPTIONS[payType]}</p>
       </div>
 
-      <div className="px-4 py-6 space-y-4">
+      <div className="px-4 py-5 space-y-4 max-w-lg mx-auto">
+        {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm">
-            ⚠️ {error}
-            <button onClick={() => setError('')} className="ml-2 font-bold">×</button>
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm flex items-start justify-between gap-2">
+            <span>⚠️ {error}</span>
+            <button onClick={() => setError('')} className="font-bold text-red-700 flex-shrink-0">×</button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                📱 M-Pesa Phone Number
-              </label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="0712345678"
-                required
-                className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-lg focus:outline-none focus:border-green-500 bg-gray-50"
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                {isWithdraw ? 'Money will be sent to this number' : 'M-Pesa prompt will be sent here'}
-              </p>
+        <div className="bg-white rounded-3xl shadow-sm p-5">
+          {/* Balance info */}
+          {(payType === 'deposit' || payType === 'withdraw') && (
+            <div className="bg-green-50 rounded-2xl p-4 mb-5">
+              <p className="text-xs text-gray-500">Your Savings Balance</p>
+              <p className="text-2xl font-black text-green-700">KES {savBalance.toLocaleString()}</p>
             </div>
+          )}
 
+          {payType === 'repay' && loanNumber && (
+            <div className="bg-orange-50 rounded-2xl p-4 mb-5">
+              <p className="text-xs text-gray-500">Repaying Loan</p>
+              <p className="text-lg font-black text-orange-700">{loanNumber}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                💰 Amount (KES)
-              </label>
+              <label className="block text-sm font-bold text-gray-700 mb-2">Amount (KES) *</label>
               <input
                 type="number"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
-                placeholder="Enter amount"
-                required
-                min="100"
+                placeholder="0"
+                min="1"
                 inputMode="numeric"
-                className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-2xl font-black focus:outline-none focus:border-green-500 bg-gray-50"
+                required
+                className="w-full px-4 py-5 border-2 border-gray-200 rounded-2xl text-4xl font-black text-center focus:outline-none focus:border-green-500 bg-gray-50"
               />
-              <p className="text-xs text-gray-400 mt-1">Minimum: KES 100</p>
             </div>
-          </div>
 
-          {/* Payment Summary */}
-          {amount && Number(amount) >= 100 && (
-            <div className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-green-500">
-              <p className="font-black text-gray-900 mb-3">Payment Summary</p>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Amount entered</span>
-                  <span className="font-bold">KES {Number(amount).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Transaction fee (1%)</span>
-                  <span className="font-bold text-orange-500">KES {transactionFee.toLocaleString()}</span>
-                </div>
-                <div className="border-t border-gray-100 pt-2 flex justify-between font-black text-base">
-                  <span className="text-gray-900">
-                    You {isWithdraw ? 'receive' : 'pay total'}
-                  </span>
-                  <span className="text-green-600">
-                    KES {finalAmount.toLocaleString()}
-                  </span>
-                </div>
+            {/* Quick amount presets */}
+            <div className="grid grid-cols-4 gap-2">
+              {[500, 1000, 2000, 5000].map(v => (
+                <button
+                  type="button"
+                  key={v}
+                  onClick={() => setAmount(String(v))}
+                  className={`py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                    Number(amount) === v
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {v >= 1000 ? `${v / 1000}K` : v}
+                </button>
+              ))}
+            </div>
+
+            {/* Withdrawal warning */}
+            {(payType === 'withdraw' || payType === 'harvest-withdraw') && Number(amount) > savBalance && Number(amount) > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3">
+                <p className="text-red-700 text-sm font-medium">
+                  ⚠️ Amount exceeds balance. Max available: KES {savBalance.toLocaleString()}
+                </p>
               </div>
+            )}
+
+            {/* Sender info */}
+            <div className="bg-gray-50 rounded-2xl p-4">
+              <p className="text-xs font-bold text-gray-500 mb-1">
+                {payType === 'deposit' || payType === 'repay' ? 'M-Pesa prompt to:' : 'Sending to M-Pesa:'}
+              </p>
+              <p className="font-bold text-gray-900">{member?.fullName}</p>
+              <p className="text-gray-600 text-sm">{member?.phoneNumber}</p>
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={loading || !amount || Number(amount) < 100}
-            className={`w-full ${current.btnColor} disabled:opacity-40 text-white font-black py-5 rounded-2xl text-xl shadow-lg flex items-center justify-center gap-2`}
-          >
-            {loading ? (
-              <>
-                <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>
-                Processing...
-              </>
-            ) : `${current.icon} ${current.btnText}`}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={
+                loading ||
+                !amount ||
+                Number(amount) <= 0 ||
+                ((payType === 'withdraw' || payType === 'harvest-withdraw') && Number(amount) > savBalance)
+              }
+              className="w-full bg-green-600 disabled:bg-green-300 text-white font-black py-5 rounded-2xl text-xl flex items-center justify-center gap-2 transition-colors"
+            >
+              {loading ? (
+                <><Spinner size={6} /> Processing...</>
+              ) : payType === 'withdraw' || payType === 'harvest-withdraw' ? (
+                `💸 Withdraw KES ${Number(amount || 0).toLocaleString()}`
+              ) : (
+                `📱 Send M-Pesa Prompt`
+              )}
+            </button>
+          </form>
+        </div>
 
-        {/* Sandbox Notice */}
+        {/* Info box */}
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-          <p className="text-xs text-blue-700 font-bold mb-1">📋 M-Pesa Integration</p>
-          <p className="text-xs text-blue-600">
-            Currently running on M-Pesa sandbox. Real payments will be enabled once production credentials are set up.
+          <p className="text-xs font-bold text-blue-800 mb-1">ℹ️ How it works</p>
+          <p className="text-xs text-blue-700">
+            {payType === 'deposit' || payType === 'repay'
+              ? 'You will receive an M-Pesa prompt on your phone. Enter your PIN and the payment is automatically confirmed in the app within 30 seconds.'
+              : 'Your savings balance is updated immediately and money is sent to your M-Pesa. May take a few minutes to arrive.'}
           </p>
         </div>
       </div>

@@ -1,209 +1,148 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Component } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useMobileStore } from './store/mobileStore'
 
-// Pages
+// Auth pages
 import MobileLoginPage from './pages/MobileLoginPage'
 import ForgotPinPage from './pages/ForgotPinPage'
-import RoleSelectPage from './pages/RoleSelectPage'
+import ResetPinPage from './pages/ResetPinPage'
+
+// Farmer pages
 import FarmerDashboard from './pages/FarmerDashboard'
-import AgentDashboard from './pages/AgentDashboard'
-import NewHarvestMobilePage from './pages/NewHarvestMobilePage'
-import ProfilePage from './pages/ProfilePage'
-import AgrovetOrderPage from './pages/AgrovetOrderPage'
-import HarvestInvoiceMobilePage from './pages/HarvestInvoiceMobilePage'
 import MpesaPaymentPage from './pages/MpesaPaymentPage'
-import NotificationsPage from './pages/NotificationsPage'
-import FarmerAnalyticsPage from './pages/FarmerAnalyticsPage'
+import HarvestSchedulePage from './pages/HarvestSchedulePage'
+import HarvestEditPage from './pages/HarvestEditPage'
+import LoanApplicationPage from './pages/LoanApplicationPage'
+import AgrovetOrderPage from './pages/AgrovetOrderPage'
 
-// ================= ERROR BOUNDARY =================
-class ErrorBoundary extends Component<any, { hasError: boolean; error: string }> {
-  constructor(props: any) {
-    super(props)
-    this.state = { hasError: false, error: '' }
+// Agent pages
+import AgentDashboard from './pages/AgentDashboard'
+
+// Shared
+import ConnectionStatus from './components/ConnectionStatus'
+
+// ─── Protected Route Wrapper ─────────────────────────────────────────────────
+function ProtectedRoute({
+  children,
+  requiredRole
+}: {
+  children: React.ReactNode
+  requiredRole?: 'farmer' | 'agent'
+}) {
+  const { token, roles } = useMobileStore()
+
+  if (!token) {
+    return <Navigate to="/login" replace />
   }
 
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error: error?.message || 'Unknown error' }
+  if (requiredRole && !roles.includes(requiredRole)) {
+    // Redirect agent to agent dashboard, farmer to farmer dashboard
+    if (roles.includes('agent')) return <Navigate to="/agent" replace />
+    if (roles.includes('farmer')) return <Navigate to="/farmer" replace />
+    return <Navigate to="/login" replace />
   }
 
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
-          <div className="bg-white rounded-3xl p-8 shadow-sm text-center max-w-sm w-full">
-            <p className="text-5xl mb-4">⚠️</p>
-
-            <h2 className="text-xl font-black text-gray-900 mb-2">
-              Something went wrong
-            </h2>
-
-            <p className="text-gray-400 text-xs mb-6 font-mono bg-gray-100 p-2 rounded break-all">
-              {this.state.error}
-            </p>
-
-            <button
-              onClick={() => {
-                this.setState({ hasError: false, error: '' })
-                window.location.href = '/login'
-              }}
-              className="w-full bg-green-600 text-white font-bold py-3 rounded-2xl"
-            >
-              Back to Login
-            </button>
-          </div>
-        </div>
-      )
-    }
-
-    return this.props.children
-  }
+  return <>{children}</>
 }
 
-// ================= PROTECTED ROUTE =================
-function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { isAuthenticated } = useMobileStore()
-  return isAuthenticated ? children : <Navigate to="/login" replace />
+// ─── Role-based default redirect ─────────────────────────────────────────────
+function RoleRedirect() {
+  const { token, roles } = useMobileStore()
+  if (!token) return <Navigate to="/login" replace />
+  if (roles.includes('farmer')) return <Navigate to="/farmer" replace />
+  if (roles.includes('agent')) return <Navigate to="/agent" replace />
+  return <Navigate to="/login" replace />
 }
 
-// ================= APP =================
-function App() {
+export default function App() {
   return (
-    <ErrorBoundary>
-      <BrowserRouter>
-        <Routes>
+    <Router>
+      <Routes>
 
-          {/* ================= AUTH ================= */}
-          <Route path="/login" element={<MobileLoginPage />} />
-          <Route path="/forgot-pin" element={<ForgotPinPage />} />
+        {/* ── Default redirect ──────────────────────────────────────────── */}
+        <Route path="/" element={<RoleRedirect />} />
 
-          <Route
-            path="/select-role"
-            element={
-              <ProtectedRoute>
-                <RoleSelectPage />
-              </ProtectedRoute>
-            }
-          />
+        {/* ── Auth routes (no protection needed) ───────────────────────── */}
+        <Route path="/login" element={<MobileLoginPage />} />
+        <Route path="/forgot-pin" element={<ForgotPinPage />} />
+        <Route path="/reset-pin" element={<ResetPinPage />} />
 
-          {/* ================= FARMER ================= */}
-          <Route
-            path="/farmer"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <FarmerDashboard />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
+        {/* ── Farmer routes ─────────────────────────────────────────────── */}
+        <Route
+          path="/farmer"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <FarmerDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/harvest/new"
-            element={
-              <ProtectedRoute>
-                <NewHarvestMobilePage />
-              </ProtectedRoute>
-            }
-          />
+        {/* M-Pesa payments — deposit, withdraw, repay loan */}
+        <Route
+          path="/farmer/mpesa"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <MpesaPaymentPage />
+            </ProtectedRoute>
+          }
+        />
 
-          {/* ✅ INVOICE ROUTE (CONFIRMED CORRECT) */}
-          <Route
-            path="/farmer/harvest/:id/invoice"
-            element={
-              <ProtectedRoute>
-                <HarvestInvoiceMobilePage />
-              </ProtectedRoute>
-            }
-          />
+        {/* Schedule a new harvest */}
+        <Route
+          path="/farmer/harvest/schedule"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <HarvestSchedulePage />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/agrovet"
-            element={
-              <ProtectedRoute>
-                <AgrovetOrderPage />
-              </ProtectedRoute>
-            }
-          />
+        {/* Edit an existing harvest */}
+        <Route
+          path="/farmer/harvest/:id/edit"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <HarvestEditPage />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/profile"
-            element={
-              <ProtectedRoute>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
+        {/* Apply for a loan digitally */}
+        <Route
+          path="/farmer/loan/apply"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <LoanApplicationPage />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/mpesa/:type"
-            element={
-              <ProtectedRoute>
-                <MpesaPaymentPage />
-              </ProtectedRoute>
-            }
-          />
+        {/* AgroVet shop */}
+        <Route
+          path="/farmer/agrovet"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <AgrovetOrderPage />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/notifications"
-            element={
-              <ProtectedRoute>
-                <NotificationsPage />
-              </ProtectedRoute>
-            }
-          />
+        {/* ── Agent routes ──────────────────────────────────────────────── */}
+        <Route
+          path="/agent"
+          element={
+            <ProtectedRoute requiredRole="agent">
+              <AgentDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-          <Route
-            path="/farmer/analytics"
-            element={
-              <ProtectedRoute>
-                <FarmerAnalyticsPage />
-              </ProtectedRoute>
-            }
-          />
+        {/* Catch-all redirect */}
+        <Route path="*" element={<RoleRedirect />} />
 
-          {/* ================= AGENT ================= */}
-          <Route
-            path="/agent"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <AgentDashboard />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
+      </Routes>
 
-          <Route
-            path="/agent/profile"
-            element={
-              <ProtectedRoute>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/agent/notifications"
-            element={
-              <ProtectedRoute>
-                <NotificationsPage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* ================= LEGACY ================= */}
-          <Route path="/driver" element={<Navigate to="/agent" replace />} />
-          <Route path="/driver/profile" element={<Navigate to="/agent/profile" replace />} />
-
-          {/* ================= DEFAULT ================= */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-
-        </Routes>
-      </BrowserRouter>
-    </ErrorBoundary>
+      {/* Connection status indicator — fixed bottom right, only shows when offline */}
+      <ConnectionStatus />
+    </Router>
   )
 }
-
-export default App
