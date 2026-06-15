@@ -2,42 +2,47 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Suspense, lazy } from 'react'
 import { useMobileStore } from './store/mobileStore'
 
-// ── Eager imports (always needed) ────────────────────────────────────────────
+// ── Always-needed pages (eager import) ───────────────────────────────────────
 import MobileLoginPage from './pages/MobileLoginPage'
 import ForgotPinPage from './pages/ForgotPinPage'
 
-// ── Lazy imports (loaded only when needed) ────────────────────────────────────
-const FarmerDashboard = lazy(() => import('./pages/FarmerDashboard'))
-const MpesaPaymentPage = lazy(() => import('./pages/MpesaPaymentPage'))
+// ── Lazy-loaded pages (only loaded when visited) ──────────────────────────────
+const FarmerDashboard    = lazy(() => import('./pages/FarmerDashboard'))
+const MpesaPaymentPage   = lazy(() => import('./pages/MpesaPaymentPage'))
 const HarvestSchedulePage = lazy(() => import('./pages/HarvestSchedulePage'))
-const HarvestEditPage = lazy(() => import('./pages/HarvestEditPage'))
+const HarvestEditPage    = lazy(() => import('./pages/HarvestEditPage'))
 const LoanApplicationPage = lazy(() => import('./pages/LoanApplicationPage'))
-const AgrovetOrderPage = lazy(() => import('./pages/AgrovetOrderPage'))
-const AgentDashboard = lazy(() => import('./pages/AgentDashboard'))
-const ResetPinPage = lazy(() => import('./pages/ResetPinPage'))
+const AgrovetOrderPage   = lazy(() => import('./pages/AgrovetOrderPage'))
+const AgentDashboard     = lazy(() => import('./pages/AgentDashboard'))
+const ResetPinPage       = lazy(() => import('./pages/ResetPinPage'))
 
-// ── Connection status (fixed bottom-right, always shown) ─────────────────────
+// ── Connection status widget ──────────────────────────────────────────────────
 import ConnectionStatus from './components/ConnectionStatus'
 
-// ── Loading screen ────────────────────────────────────────────────────────────
+// ── Loading spinner shown while lazy pages load ───────────────────────────────
 function PageLoader() {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
-      <div className="w-16 h-16 bg-green-600 rounded-3xl flex items-center justify-center mb-4 shadow-xl">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
+      <div className="w-16 h-16 bg-green-600 rounded-3xl flex items-center justify-center shadow-xl">
         <span className="text-white text-2xl font-black">IG</span>
       </div>
-      <svg className="animate-spin h-8 w-8 text-green-600" viewBox="0 0 24 24" fill="none">
+      <svg
+        className="animate-spin h-8 w-8 text-green-600"
+        viewBox="0 0 24 24"
+        fill="none"
+      >
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
+      <p className="text-gray-400 text-sm">Loading...</p>
     </div>
   )
 }
 
-// ── Protected route wrapper ───────────────────────────────────────────────────
+// ── ProtectedRoute — redirects if not authenticated ───────────────────────────
 function ProtectedRoute({
   children,
-  requiredRole
+  requiredRole,
 }: {
   children: React.ReactNode
   requiredRole?: 'farmer' | 'agent'
@@ -49,8 +54,7 @@ function ProtectedRoute({
   }
 
   if (requiredRole && !roles.includes(requiredRole)) {
-    // Redirect to appropriate dashboard
-    if (roles.includes('agent')) return <Navigate to="/agent" replace />
+    if (roles.includes('agent'))  return <Navigate to="/agent"  replace />
     if (roles.includes('farmer')) return <Navigate to="/farmer" replace />
     return <Navigate to="/login" replace />
   }
@@ -58,31 +62,33 @@ function ProtectedRoute({
   return <>{children}</>
 }
 
-// ── Smart redirect based on user role ────────────────────────────────────────
+// ── Smart redirect based on user's role ───────────────────────────────────────
 function RoleRedirect() {
   const { token, roles } = useMobileStore()
   if (!token) return <Navigate to="/login" replace />
   if (roles.includes('farmer')) return <Navigate to="/farmer" replace />
-  if (roles.includes('agent')) return <Navigate to="/agent" replace />
+  if (roles.includes('agent'))  return <Navigate to="/agent"  replace />
   return <Navigate to="/login" replace />
 }
 
-// ── Main App ──────────────────────────────────────────────────────────────────
+// ── Root App ──────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <Router>
       <Suspense fallback={<PageLoader />}>
         <Routes>
 
-          {/* Default — redirect based on role */}
+          {/* Default root — redirect by role */}
           <Route path="/" element={<RoleRedirect />} />
 
-          {/* Auth routes — no protection */}
-          <Route path="/login" element={<MobileLoginPage />} />
+          {/* ── Public auth pages ─────────────────────────────────────────── */}
+          <Route path="/login"      element={<MobileLoginPage />} />
           <Route path="/forgot-pin" element={<ForgotPinPage />} />
-          <Route path="/reset-pin" element={<ResetPinPage />} />
+          <Route path="/reset-pin"  element={<ResetPinPage />} />
 
-          {/* ── Farmer routes ─────────────────────────────────────────────── */}
+          {/* ── Farmer pages ─────────────────────────────────────────────── */}
+
+          {/* Main farmer dashboard */}
           <Route
             path="/farmer"
             element={
@@ -92,7 +98,12 @@ export default function App() {
             }
           />
 
-          {/* M-Pesa payments: /farmer/mpesa?type=deposit|withdraw|repay */}
+          {/* M-Pesa payments
+              Usage:
+              /farmer/mpesa?type=deposit
+              /farmer/mpesa?type=withdraw
+              /farmer/mpesa?type=repay&loanId=xxx&loanNumber=LN-0001
+          */}
           <Route
             path="/farmer/mpesa"
             element={
@@ -102,7 +113,7 @@ export default function App() {
             }
           />
 
-          {/* Schedule harvest pickup */}
+          {/* Schedule a new harvest pickup */}
           <Route
             path="/farmer/harvest/schedule"
             element={
@@ -112,7 +123,7 @@ export default function App() {
             }
           />
 
-          {/* Edit scheduled/confirmed harvest */}
+          {/* Edit an existing harvest (only scheduled/confirmed) */}
           <Route
             path="/farmer/harvest/:id/edit"
             element={
@@ -122,7 +133,7 @@ export default function App() {
             }
           />
 
-          {/* Apply for loan digitally */}
+          {/* Digital loan application */}
           <Route
             path="/farmer/loan/apply"
             element={
@@ -142,7 +153,9 @@ export default function App() {
             }
           />
 
-          {/* ── Agent routes ──────────────────────────────────────────────── */}
+          {/* ── Agent pages ──────────────────────────────────────────────── */}
+
+          {/* Agent dashboard */}
           <Route
             path="/agent"
             element={
@@ -152,13 +165,13 @@ export default function App() {
             }
           />
 
-          {/* Catch-all — redirect based on role */}
+          {/* ── Catch-all ────────────────────────────────────────────────── */}
           <Route path="*" element={<RoleRedirect />} />
 
         </Routes>
       </Suspense>
 
-      {/* Global connection status indicator */}
+      {/* Connection status — fixed bottom-right, only visible when offline */}
       <ConnectionStatus />
     </Router>
   )
