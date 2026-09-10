@@ -1,1361 +1,374 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
 
-// ── safe converters ────────────────────────────────────────────────────────────
-const num = (v: any): number => {
-  const n = Number(v)
-  return isNaN(n) ? 0 : n
+type Tab = 'home' | 'harvests' | 'savings' | 'loans' | 'profile'
+
+const STATUS_LABEL: Record<string, string> = {
+  scheduled:          '⏳ Waiting for agent',
+  confirmed:          '✅ Agent assigned',
+  harvesting:         '🌿 Harvesting now',
+  picked_up:          '🚗 In transit',
+  delivered_to_sacco: '🏭 At SACCO',
+  graded:             '📊 Graded — payment pending',
+  paid:               '💰 Paid!'
+}
+const STATUS_COLORS: Record<string, string> = {
+  scheduled:          'bg-yellow-100 text-yellow-800',
+  confirmed:          'bg-blue-100 text-blue-800',
+  harvesting:         'bg-lime-100 text-lime-800',
+  picked_up:          'bg-purple-100 text-purple-800',
+  delivered_to_sacco: 'bg-orange-100 text-orange-800',
+  graded:             'bg-teal-100 text-teal-800',
+  paid:               'bg-green-100 text-green-800'
+}
+const LOAN_MSG: Record<string, string> = {
+  pending:   '⏳ Under review. You will be notified of the decision.',
+  approved:  '✅ Approved! Disbursement is being processed.',
+  disbursed: '💸 Disbursed to your M-Pesa. Start making monthly repayments.',
+  repaying:  '📈 On track — keep up with monthly repayments!',
+  completed: '🎉 Fully repaid! You are eligible for a new loan.',
+  rejected:  '❌ Not approved this time. Visit SACCO for details.'
 }
 
-// ── tiny reusable buttons ──────────────────────────────────────────────────────
-function QuickBtn({
-  emoji, label, color, onClick
-}: { emoji: string; label: string; color: string; onClick: () => void }) {
+function Spinner({ size = 6, cls = 'text-green-600' }: { size?: number; cls?: string }) {
   return (
-    <button
-      onClick={onClick}
-      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border ${color} active:opacity-70 transition-opacity`}
-    >
-      <span className="text-2xl">{emoji}</span>
-      <span className="text-xs text-gray-700 text-center leading-tight font-medium">{label}</span>
-    </button>
-  )
-}
-
-function NavBtn({
-  emoji, label, active, onClick
-}: { emoji: string; label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="flex flex-col items-center gap-1 py-1 px-2 min-w-0">
-      <span className={`text-xl transition-transform ${active ? 'scale-110' : ''}`}>{emoji}</span>
-      <span className={`text-xs font-medium ${active ? 'text-green-600' : 'text-gray-400'}`}>
-        {label}
-      </span>
-    </button>
-  )
-}
-
-// ── status helpers ─────────────────────────────────────────────────────────────
-const STATUS_COLOR: Record<string, string> = {
-  scheduled: 'bg-yellow-100 text-yellow-700',
-  confirmed: 'bg-blue-100 text-blue-700',
-  harvesting: 'bg-lime-100 text-lime-700',
-  picked_up: 'bg-purple-100 text-purple-700',
-  delivered_to_sacco: 'bg-orange-100 text-orange-700',
-  graded: 'bg-teal-100 text-teal-700',
-  paid: 'bg-green-100 text-green-700',
-}
-
-const STATUS_DESC: Record<string, string> = {
-  scheduled: '⏳ Waiting for agent assignment',
-  confirmed: '🧑‍🌾 Agent assigned — coming to your farm',
-  harvesting: '🌿 Agent currently harvesting your miraa',
-  picked_up: '📦 Miraa collected — in transit to SACCO',
-  delivered_to_sacco: '🏭 Arrived at SACCO — awaiting grading',
-  graded: '✅ Graded — payment being processed',
-  paid: '💰 Payment sent to your M-Pesa!',
-}
-
-const PROGRESS_W: Record<string, string> = {
-  scheduled: 'w-1/6',
-  confirmed: 'w-2/6',
-  harvesting: 'w-3/6',
-  picked_up: 'w-4/6',
-  delivered_to_sacco: 'w-5/6',
-  graded: 'w-5/6',
-  paid: 'w-full',
-}
-
-const PROGRESS_C: Record<string, string> = {
-  scheduled: 'bg-yellow-400',
-  confirmed: 'bg-blue-500',
-  harvesting: 'bg-lime-500',
-  picked_up: 'bg-purple-500',
-  delivered_to_sacco: 'bg-orange-500',
-  graded: 'bg-teal-500',
-  paid: 'bg-green-500',
-}
-
-// ── Spinner ────────────────────────────────────────────────────────────────────
-function Spinner({ size = 6 }: { size?: number }) {
-  return (
-    <svg
-      className={`animate-spin h-${size} w-${size} text-green-600`}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
+    <svg className={`animate-spin h-${size} w-${size} ${cls}`} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
     </svg>
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  MAIN COMPONENT
-// ══════════════════════════════════════════════════════════════════════════════
+// Simple bar chart component
+function MiniBar({ value, max, color = '#16a34a', label = '' }: { value: number; max: number; color?: string; label?: string }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0
+  return (
+    <div className="flex items-center gap-2">
+      {label && <span className="text-xs text-gray-500 w-16 flex-shrink-0">{label}</span>}
+      <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+        <div className="h-3 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      <span className="text-xs font-bold text-gray-700 w-10 text-right">{value > 0 ? (value >= 1000 ? `${(value/1000).toFixed(1)}t` : `${value}kg`) : '0'}</span>
+    </div>
+  )
+}
+
 export default function FarmerDashboard() {
-  const navigate = useNavigate()
-  const { member, roles, logout, setActiveRole } = useMobileStore()
+  const navigate  = useNavigate()
+  const { member, logout } = useMobileStore()
 
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [tab, setTab]           = useState<Tab>('home')
+  const [data, setData]         = useState<any>(null)
+  const [loading, setLoading]   = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState<'home' | 'harvests' | 'savings' | 'loans'>('home')
+  const [error, setError]       = useState('')
 
-  // ── auth guard ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!member?.id) {
-      navigate('/login', { replace: true })
-      return
-    }
+    if (!member?.id) { navigate('/login', { replace: true }); return }
+    load()
+    const t = setInterval(() => load(false), 60_000)
+    return () => clearInterval(t)
+  }, [member?.id])
 
-    loadDashboard()
-
-    // soft refresh every 90 s
-    const id = setInterval(() => loadDashboard(false), 90_000)
-
-    return () => clearInterval(id)
-  }, [member?.id]) // eslint-disable-line
-
-  const loadDashboard = async (showSpinner = true) => {
+  const load = useCallback(async (spinner = true) => {
     if (!member?.id) return
-
-    if (showSpinner) setLoading(true)
-    else setRefreshing(true)
-
+    spinner ? setLoading(true) : setRefreshing(true)
     setError('')
-
     try {
       const r = await api.get(`/api/mobile/farmer/${member.id}/dashboard`)
-      const d = r?.data?.data
-
-      if (!d) throw new Error('Empty response from server')
-
-      setData(d)
+      setData(r.data?.data)
     } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Connection failed'
-
-      if (showSpinner) setError(msg)
-
-      console.error('Dashboard error:', msg)
+      if (spinner) setError(e.response?.data?.error || 'Failed to load. Check your connection.')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      spinner ? setLoading(false) : setRefreshing(false)
     }
-  }
+  }, [member?.id])
 
-  // ── redirect if not authenticated ───────────────────────────────────────────
-  if (!member) {
-    navigate('/login', { replace: true })
-    return null
-  }
+  if (!member) return null
 
-  // ── loading screen ──────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4">
-        <div className="w-20 h-20 bg-green-600 rounded-3xl flex items-center justify-center shadow-xl">
-          <span className="text-white text-3xl font-black">IG</span>
-        </div>
-
-        <Spinner size={8} />
-
-        <p className="text-gray-500 text-sm">Loading your dashboard…</p>
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
+      <div className="w-20 h-20 bg-green-600 rounded-3xl flex items-center justify-center shadow-xl">
+        <span className="text-white text-3xl font-black">IG</span>
       </div>
-    )
-  }
-
-  // ── error screen ────────────────────────────────────────────────────────────
-  if (error && !data) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6 gap-4">
-        <p className="text-5xl">⚠️</p>
-
-        <p className="font-bold text-gray-900">Failed to load dashboard</p>
-
-        <p className="text-gray-500 text-sm text-center">{error}</p>
-
-        <button
-          onClick={() => loadDashboard()}
-          className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold"
-        >
-          Try Again
-        </button>
-      </div>
-    )
-  }
-
-  // ── unpack data safely ──────────────────────────────────────────────────────
-  const memberInfo = data?.member ?? member
-
-  // FIXED: Separate savings vs shares
-  const savingsAccounts =
-    data?.savingsAccounts?.filter((a: any) => a.accountType === 'savings') || []
-
-  const shareAccounts =
-    data?.savingsAccounts?.filter((a: any) => a.accountType === 'shares') || []
-
-  const totalSavings = savingsAccounts.reduce(
-    (s: number, a: any) => s + Number(a.balance),
-    0
+      <Spinner size={8} />
+      <p className="text-gray-400 text-sm">Loading your dashboard...</p>
+    </div>
   )
 
-  // FIXED: Fetch all loans
-  const allLoans = data?.activeLoans || []
+  if (error && !data) return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 gap-4">
+      <p className="text-5xl">⚠️</p>
+      <p className="font-bold text-gray-900 text-center">{error}</p>
+      <button onClick={() => load()} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold">Retry</button>
+    </div>
+  )
 
-  const shareCapital =
-    data?.shareCapital ?? {
-      units: 0,
-      valuePerUnit: 100,
-      totalValue: 0,
-      balance: 0,
-    }
+  const d               = data || {}
+  const mem             = d.member || member
+  const savAccounts: any[] = d.savingsAccounts || []
+  const shareCapital    = d.shareCapital || {}
+  const allLoans: any[] = d.activeLoans || []
+  const harvests: any[] = d.recentHarvests || []
+  const prices: any[]   = d.currentPrices || []
+  const announcements: any[] = d.announcements || []
+  const todayLimit      = d.todayLimit
+  const eligibility     = d.loanEligibility || {}
 
-  const recentHarvests = data?.recentHarvests ?? []
-  const prices = data?.currentPrices ?? []
-  const announcements = data?.announcements ?? []
-  const todayLimit = data?.todayLimit ?? null
+  const savAcc     = savAccounts.find((a: any) => a.accountType === 'savings')
+  const totalSav   = Number(savAcc?.balance || 0)
+  const shareBal   = Number(shareCapital.balance || 0)
+  const activeLoan = allLoans.find((l: any) => ['disbursed','repaying'].includes(l.status))
+  const latestH    = harvests[0]
 
-  const hour = new Date().getHours()
+  // Analytics for harvest tab
+  const paidHarvests     = harvests.filter((h: any) => h.status === 'paid')
+  const totalKg          = paidHarvests.reduce((s: number, h: any) => s + Number(h.actualWeightKg || 0), 0)
+  const totalEarnings    = harvests.reduce((s: number, h: any) => s + (h.items || []).reduce((x: number, i: any) => x + Number(i.totalValue || 0), 0), 0)
+  const gradeBreakdown   = harvests.flatMap((h: any) => h.items || []).reduce((acc: any, i: any) => {
+    const g = i.miraaGrade
+    acc[g] = (acc[g] || 0) + Number(i.weightKg || 0)
+    return acc
+  }, {} as Record<string, number>)
+  const maxGradeKg = Math.max(...Object.values(gradeBreakdown) as number[], 1)
+  const bestGrade  = Object.entries(gradeBreakdown).sort((a, b) => (b[1] as number) - (a[1] as number))[0]
 
-  const greeting =
-    hour < 12
-      ? '🌅 Good morning'
-      : hour < 17
-      ? '☀️ Good afternoon'
-      : '🌙 Good evening'
+  // ── HOME ────────────────────────────────────────────────────────────────────
+  const HomeTab = () => (
+    <div>
+      {/* Hero header */}
+      <div className="bg-gradient-to-br from-green-800 via-green-700 to-green-600 px-5 pt-14 pb-24 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-40 h-40 bg-white/5 rounded-full translate-x-12 -translate-y-12" />
+        <div className="absolute bottom-0 left-0 w-28 h-28 bg-white/5 rounded-full -translate-x-6 translate-y-6" />
 
-  // ── harvest card helper ─────────────────────────────────────────────────────
-  const HarvestCard = ({ h, compact = false }: { h: any; compact?: boolean }) => {
-    const totalVal = (h.items ?? []).reduce(
-      (s: number, i: any) => s + num(i.totalValue),
-      0
-    )
-
-    return (
-      <div className="border border-gray-100 rounded-2xl overflow-hidden">
-        {/* card header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
-          <div className="flex items-center gap-2">
-            <span>🌿</span>
-
-            <span className="font-black text-sm text-gray-900">
-              {h.harvestNumber || h.harvest_number}
-            </span>
-          </div>
-
-          <span
-            className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${
-              STATUS_COLOR[h.status] ?? 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            {(h.status ?? '').replace(/_/g, ' ')}
-          </span>
-        </div>
-
-        <div className="px-4 py-3 space-y-2">
-          <p className="text-xs text-gray-500">
-            {STATUS_DESC[h.status] ?? '—'}
-          </p>
-                    {/* agent contact */}
-          {(h.agentName || h.agent_name) && (
-            <div className="bg-blue-50 rounded-xl p-2.5">
-              <p className="text-xs font-bold text-blue-800 mb-1">
-                🧑‍🌾 Your Agent
-              </p>
-
-              <p className="text-sm font-bold text-blue-900">
-                {h.agentName || h.agent_name}
-              </p>
-
-              {(h.assignedAgent?.phoneNumber || h.agentPhone) && (
-                <div className="flex gap-2 mt-1.5">
-                  <a
-                    href={`tel:${h.assignedAgent?.phoneNumber || h.agentPhone}`}
-                    className="flex-1 bg-blue-600 text-white text-xs font-bold py-1.5 rounded-lg text-center"
-                  >
-                    📞 Call Agent
-                  </a>
-
-                  <a
-                    href={`https://wa.me/254${(
-                      h.assignedAgent?.phoneNumber ||
-                      h.agentPhone ||
-                      ''
-                    ).slice(-9)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 bg-green-500 text-white text-xs font-bold py-1.5 rounded-lg text-center"
-                  >
-                    💬 WhatsApp
-                  </a>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* FIXED: Edit scheduled/confirmed harvest */}
-          {['scheduled', 'confirmed'].includes(h.status) && (
-            <button
-              onClick={() => navigate(`/farmer/harvest/${h.id}/edit`)}
-              className="w-full bg-yellow-500 text-white text-xs font-bold py-2.5 rounded-xl"
-            >
-              ✏️ Edit Harvest
-            </button>
-          )}
-
-          {/* weight comparison */}
-          {(h.estimatedWeightKg ||
-            h.actualWeightKg ||
-            h.estimated_weight_kg ||
-            h.actual_weight_kg) && (
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {[
-                {
-                  label: 'Your Estimate',
-                  value:
-                    h.estimatedWeightKg ?? h.estimated_weight_kg,
-                  color: 'text-blue-600',
-                },
-                {
-                  label: 'Actual',
-                  value: h.actualWeightKg ?? h.actual_weight_kg,
-                  color: 'text-gray-900',
-                },
-                {
-                  label: 'Variance',
-                  value:
-                    h.weightVarianceKg ?? h.weight_variance_kg,
-                  color:
-                    num(
-                      h.weightVarianceKg ??
-                        h.weight_variance_kg
-                    ) >= 0
-                      ? 'text-green-600'
-                      : 'text-red-500',
-                },
-              ].map((col) => {
-                const raw = num(col.value)
-
-                const display =
-                  col.label === 'Variance'
-                    ? col.value != null
-                      ? `${raw >= 0 ? '+' : ''}${raw.toFixed(1)} kg`
-                      : '—'
-                    : col.value != null
-                    ? `${raw} kg`
-                    : '—'
-
-                return (
-                  <div
-                    key={col.label}
-                    className="bg-gray-50 rounded-xl p-2"
-                  >
-                    <p className="text-xs text-gray-400">
-                      {col.label}
-                    </p>
-
-                    <p
-                      className={`font-bold text-sm ${col.color}`}
-                    >
-                      {display}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* progress bar */}
+        <div className="flex justify-between items-start relative">
           <div>
-            <div className="w-full bg-gray-100 rounded-full h-2 mb-1">
-              <div
-                className={`h-2 rounded-full ${
-                  PROGRESS_C[h.status] ?? 'bg-gray-300'
-                } ${PROGRESS_W[h.status] ?? 'w-0'}`}
-              />
-            </div>
-
-            <div className="flex justify-between text-xs text-gray-400">
-              <span>Scheduled</span>
-
-              <span>
-                📅{' '}
-                {new Date(
-                  h.harvestDate || h.harvest_date
-                ).toLocaleDateString('en-KE')}
-              </span>
-
-              {totalVal > 0 && (
-                <span className="font-black text-green-600">
-                  KES {totalVal.toLocaleString()}
-                </span>
-              )}
-            </div>
+            <p className="text-green-300 text-xs font-medium tracking-wide">🌿 IGEMBE SACCO</p>
+            <h1 className="text-white text-2xl font-black mt-0.5">
+              Hello, {String(mem?.fullName || '').split(' ')[0]}!
+            </h1>
+            <p className="text-green-300 text-xs mt-1">{mem?.memberNumber} · {mem?.village}</p>
           </div>
+          <div className="flex gap-2">
+            <button onClick={() => load(false)}
+              className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
+              {refreshing ? <Spinner size={4} cls="text-white" /> : <span className="text-white">🔄</span>}
+            </button>
+            <button onClick={() => setTab('profile')}
+              className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
+              <span className="text-white text-sm font-black">{String(mem?.fullName || 'U').charAt(0)}</span>
+            </button>
+          </div>
+        </div>
 
-          {/* grading items */}
-          {!compact && (h.items ?? []).length > 0 && (
-            <div className="bg-green-50 rounded-xl p-3">
-              <p className="text-xs font-bold text-green-800 mb-1">
-                Payment Breakdown
-              </p>
+        {/* Balance card */}
+        <div className="mt-5 bg-white/15 backdrop-blur-sm rounded-3xl p-4 border border-white/20">
+          <p className="text-green-200 text-xs">Total Savings</p>
+          <p className="text-white text-4xl font-black mt-0.5">KES {totalSav.toLocaleString()}</p>
+          <div className="flex gap-4 mt-2">
+            <div><p className="text-green-300 text-xs">Share Capital</p><p className="text-white text-sm font-bold">KES {shareBal.toLocaleString()}</p></div>
+            <div><p className="text-green-300 text-xs">Harvest Earnings</p><p className="text-white text-sm font-bold">KES {Number(mem?.harvestAccountBalance || 0).toLocaleString()}</p></div>
+          </div>
+        </div>
+      </div>
 
-              {(h.items ?? []).map((item: any) => (
-                <div
-                  key={item.id}
-                  className="flex justify-between text-xs text-green-700 mb-0.5"
-                >
-                  <span>
-                    {item.miraaGrade ?? item.miraa_grade}:{' '}
-                    {num(item.weightKg ?? item.weight_kg)}kg @
-                    KES{' '}
-                    {num(
-                      item.pricePerKg ?? item.price_per_kg
-                    ).toLocaleString()}
-                  </span>
+      {/* Quick action cards */}
+      <div className="px-4 -mt-12 mb-4">
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { emoji: '📥', label: 'Deposit',  bg: 'bg-green-600',  action: () => navigate('/farmer/mpesa?type=deposit') },
+            { emoji: '💸', label: 'Withdraw', bg: 'bg-blue-600',   action: () => navigate('/farmer/mpesa?type=withdraw') },
+            { emoji: '🌿', label: 'Schedule', bg: 'bg-teal-600',   action: () => navigate('/farmer/harvest/schedule') },
+            { emoji: '🛒', label: 'AgroVet',  bg: 'bg-orange-500', action: () => navigate('/farmer/agrovet') },
+          ].map(item => (
+            <button key={item.label} onClick={item.action}
+              className={`${item.bg} rounded-2xl p-3.5 shadow-lg flex flex-col items-center gap-1.5 active:scale-95 transition-transform`}>
+              <span className="text-2xl">{item.emoji}</span>
+              <span className="text-xs font-bold text-white">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-                  <span className="font-bold">
-                    KES{' '}
-                    {num(
-                      item.totalValue ?? item.total_value
-                    ).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-
-              <div className="border-t border-green-200 mt-1.5 pt-1.5 flex justify-between font-black text-green-800 text-sm">
-                <span>Total</span>
-
-                <span>KES {totalVal.toLocaleString()}</span>
+      <div className="px-4 space-y-4 pb-24">
+        {/* Announcements */}
+        {announcements.filter((a: any) => !a.isRead).map((ann: any) => (
+          <div key={ann.id} className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+            <div className="flex items-start gap-2">
+              <span className="text-xl flex-shrink-0">📢</span>
+              <div>
+                <p className="font-bold text-blue-900 text-sm">{ann.title}</p>
+                <p className="text-blue-700 text-xs mt-1">{ann.message}</p>
               </div>
             </div>
-          )}
-
-          {/* invoice button */}
-          {h.status === 'paid' && (
-            <button
-              onClick={() =>
-                navigate(`/farmer/harvest/${h.id}/invoice`)
-              }
-              className="w-full bg-blue-600 text-white text-xs font-bold py-2.5 rounded-xl"
-            >
-              📄 View / Download Invoice
-            </button>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  //  RENDER
-  // ══════════════════════════════════════════════════════════════════════════════
-  return (
-    <div className="min-h-screen bg-gray-50 pb-28">
-      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-br from-green-800 via-green-700 to-green-600 px-5 pt-12 pb-28 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-48 h-48 bg-white opacity-5 rounded-full translate-x-16 -translate-y-16" />
-
-        <div className="absolute bottom-0 left-0 w-36 h-36 bg-white opacity-5 rounded-full -translate-x-10 translate-y-10" />
-
-        {/* top bar */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center shadow-md flex-shrink-0">
-              <span className="text-green-700 text-sm font-black">
-                IG
-              </span>
-            </div>
-
-            <div>
-              <p className="text-green-200 text-xs">
-                {greeting}
-              </p>
-
-              <h1 className="text-white text-xl font-black leading-tight">
-                {(memberInfo?.fullName ??
-                  member?.fullName ??
-                  ''
-                ).split(' ')[0]}{' '}
-                👋
-              </h1>
-            </div>
           </div>
+        ))}
 
-          {/* right icons */}
-          <div className="flex items-center gap-2">
-            {/* refresh */}
-            <button
-              onClick={() => loadDashboard(false)}
-              disabled={refreshing}
-              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center"
-            >
-              {refreshing ? (
-                <Spinner size={4} />
-              ) : (
-                <span className="text-sm">🔄</span>
-              )}
-            </button>
-
-            {/* notifications */}
-            <button
-              onClick={() =>
-                navigate('/farmer/notifications')
-              }
-              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center relative"
-            >
-              <span className="text-sm">🔔</span>
-
-              {announcements.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-black">
-                  {announcements.length}
-                </span>
-              )}
-            </button>
-
-            {/* profile */}
-            <button
-              onClick={() => navigate('/farmer/profile')}
-              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center overflow-hidden"
-            >
-              {memberInfo?.profilePhotoUrl ? (
-                <img
-                  src={memberInfo.profilePhotoUrl}
-                  alt=""
-                  className="w-full h-full object-cover rounded-xl"
-                  onError={(e) => {
-                    ;(
-                      e.target as HTMLImageElement
-                    ).style.display = 'none'
-                  }}
-                />
-              ) : (
-                <span className="text-white text-sm font-black">
-                  {(
-                    memberInfo?.fullName ??
-                    member?.fullName ??
-                    '?'
-                  ).charAt(0)}
-                </span>
-              )}
-            </button>
-
-            {/* logout */}
-            <button
-              onClick={() => {
-                logout()
-                navigate('/login')
-              }}
-              className="w-9 h-9 bg-white bg-opacity-20 rounded-xl flex items-center justify-center"
-            >
-              <span className="text-sm">🚪</span>
-            </button>
-          </div>
-        </div>
-
-        {/* pills */}
-        <div className="flex items-center gap-2 mb-5 flex-wrap">
-          <span className="bg-white bg-opacity-20 text-white text-xs px-3 py-1.5 rounded-full font-medium">
-            🌿 {memberInfo?.memberNumber ?? member?.memberNumber}
-          </span>
-
-          {(memberInfo?.village ?? member?.village) && (
-            <span className="bg-white bg-opacity-20 text-white text-xs px-3 py-1.5 rounded-full font-medium">
-              📍 {memberInfo?.village ?? member?.village}
-            </span>
-          )}
-
-          {roles.includes('agent') && (
-            <button
-              onClick={() => {
-                setActiveRole('agent')
-                navigate('/agent')
-              }}
-              className="bg-blue-500 bg-opacity-90 text-white text-xs px-3 py-1.5 rounded-full font-bold active:opacity-80"
-            >
-              🧑‍🌾 Agent View
-            </button>
-          )}
-        </div>
-
-        {/* balance card */}
-        <div className="bg-white bg-opacity-15 rounded-3xl p-5 border border-white border-opacity-20">
-          <p className="text-green-100 text-xs font-medium mb-1">
-            Total Savings Balance
-          </p>
-
-          <p className="text-white text-4xl font-black mb-1">
-            KES {totalSavings.toLocaleString()}
-          </p>
-
-          {num(shareCapital.totalValue) > 0 && (
-            <p className="text-green-200 text-xs mb-3">
-              📊 Share Capital: KES{' '}
-              {num(shareCapital.totalValue).toLocaleString()}
-            </p>
-          )}
-
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              {
-                label: 'Accounts',
-                value: savingsAccounts.length,
-                tab: 'savings',
-              },
-              {
-                label: 'Loans',
-                value: allLoans.length,
-                tab: 'loans',
-              },
-              {
-                label: 'Harvests',
-                value: recentHarvests.length,
-                tab: 'harvests',
-              },
-            ].map((s) => (
-              <button
-                key={s.label}
-                onClick={() => setActiveTab(s.tab as any)}
-                className="bg-white bg-opacity-10 active:bg-opacity-20 rounded-xl p-2.5 text-center"
-              >
-                <p className="text-white text-lg font-black">
-                  {s.value}
-                </p>
-
-                <p className="text-green-200 text-xs">
-                  {s.label}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-            {/* ── CONTENT AREA ─────────────────────────────────────────────────────── */}
-      <div className="px-4 -mt-16 space-y-4">
-
-        {/* announcement banner */}
-        {announcements.length > 0 && (
-          <button
-            onClick={() => navigate('/farmer/notifications')}
-            className={`w-full rounded-2xl p-4 flex items-center gap-3 text-left active:opacity-90 ${
-              announcements[0]?.type === 'urgent'
-                ? 'bg-red-50 border border-red-200'
-                : announcements[0]?.type === 'warning'
-                ? 'bg-yellow-50 border border-yellow-200'
-                : 'bg-blue-50 border border-blue-200'
-            }`}
-          >
-            <span className="text-2xl flex-shrink-0">
-              {announcements[0]?.type === 'urgent'
-                ? '🚨'
-                : announcements[0]?.type === 'warning'
-                ? '⚠️'
-                : 'ℹ️'}
-            </span>
-
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-gray-900 text-sm truncate">
-                {announcements[0]?.title}
-              </p>
-
-              <p className="text-gray-600 text-xs truncate">
-                {announcements[0]?.message}
-              </p>
-            </div>
-
-            <span className="text-gray-400 font-bold flex-shrink-0">
-              →
-            </span>
-          </button>
-        )}
-
-        {/* harvest limit warning */}
+        {/* Harvest limit */}
         {todayLimit && (
-          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-3">
-            <span className="text-2xl flex-shrink-0">⚖️</span>
-
-            <div>
-              <p className="font-bold text-orange-900 text-sm">
-                Today's Harvest Limit
-              </p>
-
-              <p className="text-orange-700 text-xs">
-                {todayLimit.maxWeightKg
-                  ? `Max: ${todayLimit.maxWeightKg} kg`
-                  : ''}
-
-                {todayLimit.maxBundles
-                  ? ` / ${todayLimit.maxBundles} bundles`
-                  : ''}
-
-                {todayLimit.notes
-                  ? ` — ${todayLimit.notes}`
-                  : ''}
-              </p>
-            </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+            <p className="font-bold text-amber-800 text-sm">⚠️ Today's Harvest Limit</p>
+            <p className="text-amber-700 text-xs mt-1">
+              Maximum: {todayLimit.maxWeightKg} kg per farmer today
+              {todayLimit.notes && ` · ${todayLimit.notes}`}
+            </p>
           </div>
         )}
 
-        {/* quick actions */}
-        <div className="bg-white rounded-3xl shadow-sm p-5">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-            Quick Actions
-          </p>
-
-          <div className="grid grid-cols-4 gap-3">
-            <QuickBtn
-              emoji="📅"
-              label="Schedule"
-              color="bg-green-50 border-green-200"
-              onClick={() => navigate('/farmer/harvest/new')}
-            />
-
-            <QuickBtn
-              emoji="🌿"
-              label="Harvests"
-              color="bg-teal-50 border-teal-200"
-              onClick={() => setActiveTab('harvests')}
-            />
-
-            <QuickBtn
-              emoji="🌱"
-              label="AgroVet"
-              color="bg-emerald-50 border-emerald-200"
-              onClick={() => navigate('/farmer/agrovet')}
-            />
-
-            <QuickBtn
-              emoji="💰"
-              label="Loans"
-              color="bg-purple-50 border-purple-200"
-              onClick={() => setActiveTab('loans')}
-            />
-
-            <QuickBtn
-              emoji="📊"
-              label="Analytics"
-              color="bg-teal-50 border-teal-200"
-              onClick={() => navigate('/farmer/analytics')}
-            />
-          </div>
-        </div>
-
-        {/* ── MARKET PRICES ─────────────────────────────────────────────────── */}
-        <div className="bg-white rounded-3xl shadow-sm p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="font-black text-gray-900">
-                Today's Miraa Prices
-              </p>
-
-              <p className="text-xs text-gray-400">
-                Set by Igembe SACCO
-              </p>
+        {/* Latest harvest */}
+        {latestH && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="flex justify-between items-center px-4 py-3 bg-gray-50 border-b border-gray-100">
+              <span className="font-black text-gray-900 text-sm">Latest Harvest</span>
+              <button onClick={() => setTab('harvests')} className="text-green-600 text-xs font-bold">View All →</button>
             </div>
-
-            <div className="bg-green-100 rounded-xl px-3 py-1.5">
-              <span className="text-sm font-bold text-green-700">
-                🌿 Live
-              </span>
-            </div>
-          </div>
-
-          {prices.length === 0 ? (
-            <div className="bg-gray-50 rounded-2xl p-4 text-center">
-              <p className="text-gray-500 text-sm">
-                Prices not set today
-              </p>
-
-              <a
-                href="tel:+254757630995"
-                className="inline-block mt-2 bg-green-600 text-white text-xs px-4 py-2 rounded-xl font-bold"
-              >
-                📞 Call Office
-              </a>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {prices.map((p: any) => {
-                const grade =
-                  p.miraaGrade ?? p.miraa_grade ?? ''
-
-                const gradients: Record<string, string> = {
-                  'Grade 1': 'from-green-700 to-green-500',
-                  'Grade 2': 'from-teal-700 to-teal-500',
-                  Gomba: 'from-orange-600 to-orange-400',
-                }
-
-                return (
-                  <div
-                    key={p.id}
-                    className={`bg-gradient-to-br ${
-                      gradients[grade] ??
-                      'from-gray-600 to-gray-500'
-                    } rounded-2xl p-4 text-white`}
-                  >
-                    <p className="text-xs font-bold opacity-80 mb-1">
-                      {grade}
-                    </p>
-
-                    <p className="text-2xl font-black">
-                      {num(
-                        p.buyingPrice ?? p.buying_price
-                      ).toLocaleString()}
-                    </p>
-
-                    <p className="text-xs opacity-70 mt-1">
-                      KES/kg
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {/* HOME TAB */}
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'home' && (
-          <>
-            {/* M-Pesa quick pay */}
-            <div className="bg-white rounded-3xl shadow-sm p-5">
-              <p className="font-black text-gray-900 mb-3">
-                📱 M-Pesa Payments
-              </p>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() =>
-                    navigate('/farmer/mpesa/deposit')
-                  }
-                  className="bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center gap-3 active:bg-green-100"
-                >
-                  <span className="text-2xl">📥</span>
-
-                  <div className="text-left">
-                    <p className="font-bold text-green-900 text-sm">
-                      Deposit
-                    </p>
-
-                    <p className="text-green-600 text-xs">
-                      Add to savings
-                    </p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() =>
-                    navigate('/farmer/mpesa/withdraw')
-                  }
-                  className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center gap-3 active:bg-blue-100"
-                >
-                  <span className="text-2xl">💸</span>
-
-                  <div className="text-left">
-                    <p className="font-bold text-blue-900 text-sm">
-                      Withdraw
-                    </p>
-
-                    <p className="text-blue-600 text-xs">
-                      To M-Pesa
-                    </p>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* share capital */}
-            {num(shareCapital.totalValue) > 0 && (
-              <div className="bg-white rounded-3xl shadow-sm p-5">
-                <p className="font-black text-gray-900 mb-3">
-                  📊 Share Capital
-                </p>
-
-                <div className="bg-gradient-to-br from-indigo-600 to-indigo-500 rounded-2xl p-4 text-white">
-                  <p className="text-indigo-200 text-xs mb-1">
-                    Total Share Capital Value
-                  </p>
-
-                  <p className="text-3xl font-black">
-                    KES{' '}
-                    {num(
-                      shareCapital.totalValue
-                    ).toLocaleString()}
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div className="bg-white bg-opacity-15 rounded-xl p-2.5 text-center">
-                      <p className="text-indigo-200 text-xs">
-                        Units
-                      </p>
-
-                      <p className="text-xl font-black">
-                        {num(shareCapital.units) ||
-                          Math.floor(
-                            num(shareCapital.balance) /
-                              Math.max(
-                                1,
-                                num(
-                                  shareCapital.valuePerUnit
-                                )
-                              )
-                          )}
-                      </p>
-                    </div>
-
-                    <div className="bg-white bg-opacity-15 rounded-xl p-2.5 text-center">
-                      <p className="text-indigo-200 text-xs">
-                        Per Unit
-                      </p>
-
-                      <p className="text-xl font-black">
-                        KES{' '}
-                        {num(shareCapital.valuePerUnit)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* loan alert */}
-            {allLoans.length > 0 && (
-              <button
-                onClick={() => setActiveTab('loans')}
-                className="w-full bg-orange-50 border border-orange-200 rounded-3xl p-4 flex items-center gap-4 text-left active:bg-orange-100"
-              >
-                <div className="w-10 h-10 bg-orange-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">⚠️</span>
-                </div>
-
-                <div className="flex-1">
-                  <p className="font-bold text-orange-900 text-sm">
-                    Loan Status Update
-                  </p>
-
-                  <p className="text-xs text-orange-700 mt-0.5">
-                    {allLoans[0]?.status
-                      ?.replace(/_/g, ' ')
-                      ?.toUpperCase()}
-                  </p>
-                </div>
-
-                <span className="text-orange-400 font-bold">
-                  →
-                </span>
-              </button>
-            )}
-
-            {/* recent harvests preview */}
-            <div className="bg-white rounded-3xl shadow-sm p-5">
-              <div className="flex items-center justify-between mb-4">
+            <div className="p-4">
+              <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-black text-gray-900">
-                    Recent Harvests
-                  </p>
-
-                  <p className="text-xs text-gray-400">
-                    Track your miraa pickups
-                  </p>
-                </div>
-
-                <button
-                  onClick={() =>
-                    navigate('/farmer/harvest/new')
-                  }
-                  className="bg-green-600 text-white text-xs px-3 py-2 rounded-xl font-bold"
-                >
-                  + Schedule
-                </button>
-              </div>
-
-              {recentHarvests.length === 0 ? (
-                <div className="bg-green-50 rounded-2xl p-6 text-center">
-                  <p className="text-4xl mb-3">🌿</p>
-
-                  <p className="font-bold text-gray-700 text-sm">
-                    No harvests yet
-                  </p>
-
-                  <button
-                    onClick={() =>
-                      navigate('/farmer/harvest/new')
-                    }
-                    className="mt-3 bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold"
-                  >
-                    Schedule First Harvest
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {recentHarvests
-                    .slice(0, 3)
-                    .map((h: any) => (
-                      <HarvestCard
-                        key={h.id}
-                        h={h}
-                        compact
-                      />
-                    ))}
-
-                  {recentHarvests.length > 3 && (
-                    <button
-                      onClick={() =>
-                        setActiveTab('harvests')
-                      }
-                      className="w-full text-green-600 text-sm font-bold py-2 border border-green-200 rounded-xl"
-                    >
-                      View all {recentHarvests.length}{' '}
-                      harvests →
-                    </button>
+                  <p className="font-black text-green-700">{latestH.harvestNumber}</p>
+                  {latestH.harvestDate && (
+                    <p className="text-gray-500 text-xs">📅 {new Date(latestH.harvestDate).toLocaleDateString('en-KE', { weekday:'short', day:'numeric', month:'short' })}</p>
                   )}
+                  {latestH.farmLocation && <p className="text-gray-400 text-xs">📍 {latestH.farmLocation}</p>}
                 </div>
+                <span className={`text-xs px-2 py-1 rounded-full font-bold ${STATUS_COLORS[latestH.status] || 'bg-gray-100 text-gray-600'}`}>
+                  {STATUS_LABEL[latestH.status] || latestH.status}
+                </span>
+              </div>
+              {latestH.agentName && (
+                <p className="text-blue-600 text-xs mt-2">🧑‍🌾 Agent: {latestH.agentName}</p>
               )}
             </div>
-          </>
-        )}
-                {/* ════════════════════════════════════════════════════════════════════ */}
-        {/* SAVINGS TAB */}
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'savings' && (
-          <div className="space-y-4">
-
-            {/* SAVINGS ACCOUNTS — clearly labelled */}
-            {savingsAccounts.length > 0 ? (
-              savingsAccounts.map((acc: any) => (
-                <div
-                  key={acc.id}
-                  className="bg-gradient-to-br from-green-700 to-green-500 rounded-3xl p-5 text-white"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <p className="text-green-100 text-xs">
-                        💵 Savings Account
-                      </p>
-
-                      <p className="text-white text-xs font-medium">
-                        {acc.accountNumber}
-                      </p>
-                    </div>
-
-                    <span className="bg-white bg-opacity-20 text-white text-xs px-2 py-1 rounded-lg font-bold">
-                      Active ✓
-                    </span>
-                  </div>
-
-                  <p className="text-4xl font-black">
-                    KES {Number(acc.balance).toLocaleString()}
-                  </p>
-
-                  <p className="text-green-200 text-xs mt-1">
-                    Withdrawable Balance
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-2 mt-4">
-                    <button
-                      onClick={() =>
-                        navigate('/farmer/mpesa/deposit')
-                      }
-                      className="bg-white bg-opacity-20 text-white text-sm font-bold py-2 rounded-xl"
-                    >
-                      📥 Deposit
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        navigate('/farmer/mpesa/withdraw')
-                      }
-                      className="bg-white bg-opacity-20 text-white text-sm font-bold py-2 rounded-xl"
-                    >
-                      💸 Withdraw
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="bg-white rounded-2xl p-6 text-center">
-                <p className="text-gray-500">
-                  No savings account
-                </p>
-              </div>
-            )}
-
-            {/* SHARE CAPITAL — separate card */}
-            {shareAccounts.length > 0 &&
-              shareAccounts.map((acc: any) => (
-                <div
-                  key={acc.id}
-                  className="bg-gradient-to-br from-indigo-700 to-indigo-500 rounded-3xl p-5 text-white"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <p className="text-indigo-100 text-xs">
-                        📊 Share Capital Account
-                      </p>
-
-                      <p className="text-white text-xs font-medium">
-                        {acc.accountNumber}
-                      </p>
-                    </div>
-
-                    <span className="bg-red-500 bg-opacity-80 text-white text-xs px-2 py-1 rounded-lg font-bold">
-                      Non-withdrawable
-                    </span>
-                  </div>
-
-                  <p className="text-4xl font-black">
-                    KES {Number(acc.balance).toLocaleString()}
-                  </p>
-
-                  <p className="text-indigo-200 text-xs mt-1">
-                    Your ownership shares in Igembe SACCO
-                  </p>
-
-                  <div className="mt-3 bg-white bg-opacity-10 rounded-xl p-3">
-                    <p className="text-xs text-indigo-100">
-                      Share capital represents your stake in the
-                      SACCO. It grows as you contribute and earns
-                      dividends annually.
-                    </p>
-                  </div>
-                </div>
-              ))}
-
-            {/* Harvest Account */}
-            {(Number(data?.member?.harvestAccountBalance) > 0 ||
-              data?.member?.harvestAccountNumber) && (
-              <div className="bg-gradient-to-br from-teal-700 to-teal-500 rounded-3xl p-5 text-white">
-                <p className="text-teal-100 text-xs">
-                  🌿 Harvest Payment Account
-                </p>
-
-                <p className="text-xs text-teal-200">
-                  {data?.member?.harvestAccountNumber}
-                </p>
-
-                <p className="text-3xl font-black mt-2">
-                  KES{' '}
-                  {Number(
-                    data?.member?.harvestAccountBalance || 0
-                  ).toLocaleString()}
-                </p>
-
-                <p className="text-teal-200 text-xs mt-1">
-                  Earnings from miraa sales
-                </p>
-              </div>
-            )}
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {/* LOANS TAB */}
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'loans' && (
-          <div className="space-y-4">
-            {allLoans.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 text-center">
-                <p className="text-5xl mb-3">💰</p>
+        {/* Miraa prices */}
+        {prices.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+            <p className="font-black text-gray-900 mb-3">📊 Today's Miraa Prices</p>
+            <div className="grid grid-cols-3 gap-2">
+              {prices.map((p: any) => (
+                <div key={p.id} className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
+                  <p className="text-xs text-gray-500 font-medium">{p.miraaGrade}</p>
+                  <p className="font-black text-green-700 text-lg">KES {Number(p.buyingPrice).toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">/kg buy</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                <p className="font-bold text-gray-900">
-                  No Active Loans
-                </p>
+        {/* Active loan snippet */}
+        {activeLoan && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+            <div className="flex justify-between items-center mb-2">
+              <p className="font-black text-gray-900">💰 Active Loan</p>
+              <span className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${activeLoan.status === 'repaying' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{activeLoan.status}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-3">
+              <span className="text-gray-500">{activeLoan.loanNumber}</span>
+              <span className="font-black text-orange-600">KES {Number(activeLoan.balanceOutstanding).toLocaleString()} left</span>
+            </div>
+            <button onClick={() => navigate(`/farmer/mpesa?type=repay&loanId=${activeLoan.id}&loanNumber=${activeLoan.loanNumber}`)}
+              className="w-full bg-green-600 text-white text-sm font-bold py-2.5 rounded-xl">
+              📱 Repay via M-Pesa
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
-                <p className="text-gray-500 text-sm mt-1">
-                  Visit the SACCO office to apply.
-                </p>
+  // ── HARVESTS + ANALYTICS ────────────────────────────────────────────────────
+  const HarvestsTab = () => {
+    const [view, setView] = useState<'list' | 'analytics'>('list')
+    return (
+      <div className="pb-24">
+        {/* Sub-tabs */}
+        <div className="px-4 pt-4 pb-3">
+          <div className="flex gap-2 bg-gray-100 rounded-2xl p-1">
+            <button onClick={() => setView('list')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${view === 'list' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500'}`}>
+              🌿 My Harvests
+            </button>
+            <button onClick={() => setView('analytics')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${view === 'analytics' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500'}`}>
+              📊 My Analytics
+            </button>
+          </div>
+        </div>
+
+        {view === 'list' ? (
+          <div className="px-4 space-y-4">
+            <div className="flex justify-between items-center">
+              <p className="font-black text-gray-900">Recent Harvests ({harvests.length})</p>
+              <button onClick={() => navigate('/farmer/harvest/schedule')}
+                className="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">
+                + Schedule
+              </button>
+            </div>
+
+            {harvests.length === 0 ? (
+              <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
+                <p className="text-5xl mb-4">🌿</p>
+                <p className="font-bold text-gray-900">No harvests yet</p>
+                <p className="text-gray-400 text-sm mt-1">Schedule your first harvest pickup</p>
+                <button onClick={() => navigate('/farmer/harvest/schedule')}
+                  className="mt-4 bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">
+                  Schedule Now →
+                </button>
               </div>
             ) : (
-              allLoans.map((loan: any) => {
-                const STATUS_COLORS_LOAN: Record<
-                  string,
-                  string
-                > = {
-                  pending:
-                    'bg-yellow-100 text-yellow-700',
-                  approved:
-                    'bg-blue-100 text-blue-700',
-                  disbursed:
-                    'bg-purple-100 text-purple-700',
-                  repaying:
-                    'bg-green-100 text-green-700',
-                  completed:
-                    'bg-gray-100 text-gray-700',
-                  rejected:
-                    'bg-red-100 text-red-700',
-                }
-
-                const paid = Number(
-                  loan.amountPaid || 0
-                )
-
-                const total = Number(
-                  loan.totalPayable ||
-                    loan.principalAmount ||
-                    1
-                )
-
-                const pct = Math.min(
-                  100,
-                  Math.round((paid / total) * 100)
-                )
-
+              harvests.map((h: any) => {
+                const totalVal = (h.items || []).reduce((s: number, i: any) => s + Number(i.totalValue || 0), 0)
                 return (
-                  <div
-                    key={loan.id}
-                    className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
-                  >
-                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                      <span className="font-black text-gray-900">
-                        {loan.loanNumber}
-                      </span>
-
-                      <span
-                        className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${
-                          STATUS_COLORS_LOAN[
-                            loan.status
-                          ] ||
-                          'bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        {loan.status}
-                      </span>
+                  <div key={h.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className={`flex justify-between items-center px-4 py-2.5 ${STATUS_COLORS[h.status] || 'bg-gray-100'}`}>
+                      <span className="font-black text-sm">{h.harvestNumber}</span>
+                      <span className="text-xs font-bold">{STATUS_LABEL[h.status] || h.status}</span>
                     </div>
-
-                    <div className="p-4">
-                      {/* Status message */}
-                      <div
-                        className={`rounded-xl p-3 mb-3 text-sm font-medium ${
-                          loan.status === 'approved'
-                            ? 'bg-blue-50 text-blue-700'
-                            : loan.status ===
-                                'disbursed' ||
-                              loan.status ===
-                                'repaying'
-                            ? 'bg-green-50 text-green-700'
-                            : loan.status ===
-                              'rejected'
-                            ? 'bg-red-50 text-red-700'
-                            : 'bg-yellow-50 text-yellow-700'
-                        }`}
-                      >
-                        {loan.status === 'pending' &&
-                          '⏳ Under review by SACCO. You will be notified when approved.'}
-
-                        {loan.status === 'approved' &&
-                          '✅ Approved! Disbursement is being processed.'}
-
-                        {loan.status === 'disbursed' &&
-                          '💸 Disbursed to your M-Pesa. Start repaying monthly.'}
-
-                        {loan.status === 'repaying' &&
-                          '📈 Active — keep up with monthly payments!'}
-
-                        {loan.status === 'rejected' &&
-                          '❌ Not approved this time. Visit office for details.'}
-
-                        {loan.status === 'completed' &&
-                          '🎉 Fully paid! You can apply for another loan.'}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 mb-3">
-                        {[
-                          {
-                            label: 'Principal',
-                            value: `KES ${Number(
-                              loan.principalAmount
-                            ).toLocaleString()}`,
-                          },
-                          {
-                            label: 'Balance',
-                            value: `KES ${Number(
-                              loan.balanceOutstanding
-                            ).toLocaleString()}`,
-                          },
-                          {
-                            label: 'Monthly',
-                            value: `KES ${Number(
-                              loan.monthlyInstallment
-                            ).toLocaleString()}`,
-                          },
-                          {
-                            label: 'Amount Paid',
-                            value: `KES ${paid.toLocaleString()}`,
-                          },
-                        ].map((item) => (
-                          <div
-                            key={item.label}
-                            className="bg-gray-50 rounded-xl p-3"
-                          >
-                            <p className="text-xs text-gray-500">
-                              {item.label}
-                            </p>
-
-                            <p className="font-black text-sm">
-                              {item.value}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-
-                      {pct > 0 && (
-                        <div className="mb-3">
-                          <div className="flex justify-between text-xs text-gray-500 mb-1">
-                            <span>
-                              Repayment Progress
+                    <div className="p-4 space-y-1.5">
+                      {h.harvestDate && <p className="text-sm text-gray-700">📅 {new Date(h.harvestDate).toLocaleDateString('en-KE', { weekday:'long', day:'numeric', month:'long' })}</p>}
+                      {h.farmLocation && <p className="text-sm text-gray-600">📍 {h.farmLocation}</p>}
+                      {h.estimatedWeightKg > 0 && <p className="text-sm text-gray-600">⚖️ Estimated: <strong>{h.estimatedWeightKg} kg</strong></p>}
+                      {h.actualWeightKg > 0 && (
+                        <p className="text-sm text-gray-600">✅ Actual: <strong>{h.actualWeightKg} kg</strong>
+                          {h.weightVarianceKg != null && (
+                            <span className={`ml-1 text-xs font-bold ${Number(h.weightVarianceKg) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              ({Number(h.weightVarianceKg) >= 0 ? '+' : ''}{Number(h.weightVarianceKg).toFixed(1)} kg)
                             </span>
-
-                            <span className="font-bold text-green-600">
-                              {pct}%
-                            </span>
-                          </div>
-
-                          <div className="w-full bg-gray-100 rounded-full h-3">
-                            <div
-                              className="bg-green-500 h-3 rounded-full"
-                              style={{
-                                width: `${pct}%`,
-                              }}
-                            />
+                          )}
+                        </p>
+                      )}
+                      {h.agentName && (
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-blue-600">🧑‍🌾 Agent: {h.agentName}</p>
+                          {h.assignedAgent?.phoneNumber && (
+                            <a href={`tel:${h.assignedAgent.phoneNumber}`} className="text-xs text-blue-500 underline">Call</a>
+                          )}
+                        </div>
+                      )}
+                      {(h.items || []).length > 0 && (
+                        <div className="bg-green-50 rounded-xl p-3 mt-2">
+                          <p className="text-xs font-bold text-green-800 mb-1.5">Graded Miraa</p>
+                          {h.items.map((item: any, i: number) => (
+                            <div key={i} className="flex justify-between text-xs text-green-700 mb-0.5">
+                              <span>{item.miraaGrade}: {item.weightKg} kg @ KES {Number(item.pricePerKg).toLocaleString()}/kg</span>
+                              <span className="font-bold">KES {Number(item.totalValue).toLocaleString()}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between text-sm font-black text-green-800 border-t border-green-200 mt-2 pt-2">
+                            <span>Total Earned</span>
+                            <span>KES {totalVal.toLocaleString()}</span>
                           </div>
                         </div>
                       )}
-
-                      {loan.dueDate && (
-                        <p className="text-xs text-orange-600 font-medium mb-3">
-                          📅 Due:{' '}
-                          {new Date(
-                            loan.dueDate
-                          ).toLocaleDateString('en-KE')}
-                        </p>
-                      )}
-
-                      {['disbursed', 'repaying'].includes(
-                        loan.status
-                      ) && (
-                        <button
-                          onClick={() =>
-                            navigate('/farmer/mpesa/repay')
-                          }
-                          className="w-full bg-green-600 text-white text-sm font-bold py-3 rounded-xl"
-                        >
-                          📱 Repay via M-Pesa
+                      {['scheduled','confirmed'].includes(h.status) && (
+                        <button onClick={() => navigate(`/farmer/harvest/${h.id}/edit`)}
+                          className="w-full mt-2 border-2 border-gray-200 text-gray-600 text-sm font-bold py-2 rounded-xl">
+                          ✏️ Edit This Harvest
                         </button>
                       )}
                     </div>
@@ -1364,59 +377,376 @@ export default function FarmerDashboard() {
               })
             )}
           </div>
+        ) : (
+          /* ── ANALYTICS ── */
+          <div className="px-4 space-y-4">
+            <p className="font-black text-gray-900 text-lg">📊 Your Harvest Analytics</p>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Total Harvests', value: String(harvests.length),      icon: '🌿', color: 'bg-green-50 border-green-100' },
+                { label: 'Paid Harvests',  value: String(paidHarvests.length),  icon: '💰', color: 'bg-emerald-50 border-emerald-100' },
+                { label: 'Total KG',       value: `${totalKg.toFixed(0)} kg`,   icon: '⚖️', color: 'bg-blue-50 border-blue-100' },
+                { label: 'Total Earnings', value: `KES ${totalEarnings >= 1000 ? (totalEarnings/1000).toFixed(1)+'K' : totalEarnings.toLocaleString()}`, icon: '📈', color: 'bg-purple-50 border-purple-100' },
+              ].map(card => (
+                <div key={card.label} className={`${card.color} border rounded-2xl p-4`}>
+                  <span className="text-2xl">{card.icon}</span>
+                  <p className="font-black text-gray-900 text-lg mt-1">{card.value}</p>
+                  <p className="text-xs text-gray-500">{card.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Grade breakdown */}
+            {Object.keys(gradeBreakdown).length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                <p className="font-black text-gray-900 mb-3">🌿 Miraa Grade Breakdown</p>
+                {bestGrade && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-3">
+                    <p className="text-xs text-green-700 font-medium">🏆 Your most harvested grade</p>
+                    <p className="font-black text-green-800 text-lg">{bestGrade[0]}</p>
+                    <p className="text-xs text-green-600">{Number(bestGrade[1]).toFixed(1)} kg total</p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {Object.entries(gradeBreakdown).map(([grade, kg]) => (
+                    <MiniBar key={grade} label={grade} value={Number(kg)} max={maxGradeKg}
+                      color={grade === 'Grade 1' ? '#16a34a' : grade === 'Grade 2' ? '#2563eb' : '#d97706'} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Harvest history table */}
+            {paidHarvests.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="font-black text-gray-900">📋 Harvest History</p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {paidHarvests.map((h: any) => {
+                    const val = (h.items || []).reduce((s: number, i: any) => s + Number(i.totalValue || 0), 0)
+                    return (
+                      <div key={h.id} className="flex justify-between items-center px-4 py-3">
+                        <div>
+                          <p className="font-bold text-sm text-gray-900">{h.harvestNumber}</p>
+                          <p className="text-xs text-gray-400">{h.harvestDate ? new Date(h.harvestDate).toLocaleDateString('en-KE', { day:'numeric', month:'short', year:'numeric' }) : '—'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-sm">{h.actualWeightKg || h.estimatedWeightKg || 0} kg</p>
+                          {val > 0 && <p className="text-xs text-green-600 font-bold">KES {val.toLocaleString()}</p>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {harvests.length === 0 && (
+              <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
+                <p className="text-4xl mb-3">📊</p>
+                <p className="font-bold text-gray-700">No analytics yet</p>
+                <p className="text-gray-400 text-sm mt-1">Complete some harvests to see your analytics</p>
+              </div>
+            )}
+
+            {/* Tips */}
+            <div className="bg-gradient-to-br from-green-50 to-teal-50 border border-green-200 rounded-2xl p-4">
+              <p className="font-bold text-green-800 text-sm mb-2">💡 Harvest Tips</p>
+              <div className="space-y-1.5 text-xs text-green-700">
+                <p>• Schedule harvests regularly to increase your loan score</p>
+                <p>• Grade 1 miraa fetches the highest price — proper care pays off</p>
+                <p>• Harvest in the early morning for maximum freshness and weight</p>
+                <p>• Work with your assigned agent for accurate grading</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── SAVINGS ─────────────────────────────────────────────────────────────────
+  const SavingsTab = () => (
+    <div className="px-4 pt-4 pb-24 space-y-4">
+      <p className="font-black text-gray-900 text-xl">💵 My Accounts</p>
+
+      {savAccounts.filter((a: any) => a.accountType === 'savings').map((acc: any) => (
+        <div key={acc.id} className="bg-gradient-to-br from-green-700 to-green-500 rounded-3xl p-5 text-white shadow-lg">
+          <div className="flex justify-between items-start mb-1">
+            <div>
+              <p className="text-green-100 text-xs font-medium tracking-wide">💵 SAVINGS ACCOUNT</p>
+              <p className="text-green-200 text-xs">{acc.accountNumber}</p>
+            </div>
+            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-bold">Active ✓</span>
+          </div>
+          <p className="text-5xl font-black mt-3">KES {Number(acc.balance).toLocaleString()}</p>
+          <p className="text-green-200 text-xs mt-1">Withdrawable balance</p>
+          <div className="grid grid-cols-2 gap-2 mt-4">
+            <button onClick={() => navigate('/farmer/mpesa?type=deposit')}
+              className="bg-white/20 hover:bg-white/30 text-white text-sm font-bold py-3 rounded-2xl transition-colors active:scale-95">
+              📥 Deposit
+            </button>
+            <button onClick={() => navigate('/farmer/mpesa?type=withdraw')}
+              className="bg-white/20 hover:bg-white/30 text-white text-sm font-bold py-3 rounded-2xl transition-colors active:scale-95">
+              💸 Withdraw
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {savAccounts.filter((a: any) => a.accountType === 'shares').map((acc: any) => (
+        <div key={acc.id} className="bg-gradient-to-br from-indigo-700 to-indigo-500 rounded-3xl p-5 text-white shadow-lg">
+          <div className="flex justify-between items-start mb-1">
+            <div>
+              <p className="text-indigo-100 text-xs font-medium tracking-wide">📊 SHARE CAPITAL</p>
+              <p className="text-indigo-200 text-xs">{acc.accountNumber}</p>
+            </div>
+            <span className="bg-red-500/70 text-white text-xs px-2 py-0.5 rounded-full font-bold">Non-withdrawable</span>
+          </div>
+          <p className="text-5xl font-black mt-3">KES {Number(acc.balance).toLocaleString()}</p>
+          <p className="text-indigo-200 text-xs mt-1">Ownership shares in Igembe SACCO</p>
+          <div className="bg-white/10 rounded-2xl p-3 mt-4">
+            <p className="text-xs text-indigo-100 leading-relaxed">
+              Share capital is your ownership stake in the SACCO. It earns annual dividends and grows as you contribute more.
+            </p>
+          </div>
+        </div>
+      ))}
+
+      {Number(mem?.harvestAccountBalance) > 0 && (
+        <div className="bg-gradient-to-br from-teal-700 to-teal-500 rounded-3xl p-5 text-white shadow-lg">
+          <p className="text-teal-100 text-xs font-medium tracking-wide">🌿 HARVEST EARNINGS</p>
+          <p className="text-teal-200 text-xs">{mem?.harvestAccountNumber}</p>
+          <p className="text-4xl font-black mt-2">KES {Number(mem?.harvestAccountBalance).toLocaleString()}</p>
+          <p className="text-teal-200 text-xs mt-1">Earnings from miraa sales</p>
+        </div>
+      )}
+
+      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+        <p className="font-bold text-gray-700 text-sm mb-3">📲 Deposit via M-Pesa Paybill</p>
+        <div className="space-y-1 text-xs text-gray-600">
+          <p>1. Open M-Pesa → Lipa na M-Pesa → Paybill</p>
+          <p>2. Business Number: <span className="font-black text-gray-900">174379</span></p>
+          <p>3. Account Number: <span className="font-black text-gray-900">{mem?.memberNumber}</span></p>
+          <p>4. Enter amount and confirm with your M-Pesa PIN</p>
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── LOANS ────────────────────────────────────────────────────────────────────
+  const LoansTab = () => (
+    <div className="px-4 pt-4 pb-24 space-y-4">
+      <div className="flex justify-between items-center">
+        <p className="font-black text-gray-900 text-xl">💰 My Loans</p>
+        {eligibility.eligible && (
+          <button onClick={() => navigate('/farmer/loan/apply')}
+            className="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">
+            Apply →
+          </button>
         )}
       </div>
 
-      {/* ── BOTTOM NAV ─────────────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 py-2 shadow-lg z-20">
-        <div className="flex items-center justify-around max-w-lg mx-auto">
-          <NavBtn
-            emoji="🏠"
-            label="Home"
-            active={activeTab === 'home'}
-            onClick={() => setActiveTab('home')}
-          />
+      {/* Score card */}
+      <div className={`rounded-2xl p-4 border ${eligibility.hasActiveLoan ? 'bg-orange-50 border-orange-200' : eligibility.loanScore > 60 ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+        <div className="flex justify-between items-center mb-2">
+          <p className="text-sm font-bold text-gray-700">Your Loan Score</p>
+          <span className="font-black text-lg text-green-700">{eligibility.loanScore || 0}<span className="text-sm text-gray-400">/100</span></span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+          <div className="h-2.5 rounded-full bg-gradient-to-r from-green-500 to-green-400 transition-all"
+            style={{ width: `${Math.min(100, eligibility.loanScore || 0)}%` }} />
+        </div>
+        <div className="flex justify-between text-xs text-gray-500">
+          <span>Max eligible: <span className="font-bold text-green-600">KES {(eligibility.maxAmount || 50000).toLocaleString()}</span></span>
+          {eligibility.hasActiveLoan && <span className="text-orange-600 font-medium">⚠️ Has active loan</span>}
+        </div>
+      </div>
 
-          <NavBtn
-            emoji="🌿"
-            label="Harvests"
-            active={activeTab === 'harvests'}
-            onClick={() => setActiveTab('harvests')}
-          />
+      {allLoans.length === 0 ? (
+        <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
+          <p className="text-4xl mb-3">💰</p>
+          <p className="font-bold text-gray-900">No loans yet</p>
+          <p className="text-gray-400 text-sm mt-1">Apply for a loan to get started</p>
+          <button onClick={() => navigate('/farmer/loan/apply')}
+            className="mt-4 bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">
+            Apply for Loan →
+          </button>
+        </div>
+      ) : (
+        allLoans.map((loan: any) => {
+          const paid  = Number(loan.amountPaid || 0)
+          const total = Number(loan.totalPayable || loan.principalAmount || 1)
+          const pct   = Math.min(100, Math.round((paid / total) * 100))
+          const bal   = Number(loan.balanceOutstanding || 0)
+          return (
+            <div key={loan.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="flex justify-between items-center px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <span className="font-black text-gray-900">{loan.loanNumber}</span>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-bold capitalize ${
+                  loan.status === 'approved' ? 'bg-blue-100 text-blue-700' :
+                  ['disbursed','repaying'].includes(loan.status) ? 'bg-green-100 text-green-700' :
+                  loan.status === 'completed' ? 'bg-gray-100 text-gray-600' :
+                  loan.status === 'rejected'  ? 'bg-red-100 text-red-700'  : 'bg-yellow-100 text-yellow-700'
+                }`}>{loan.status}</span>
+              </div>
+              <div className="p-4">
+                <div className={`text-xs font-medium rounded-xl px-3 py-2 mb-3 ${
+                  loan.status === 'approved'  ? 'bg-blue-50 text-blue-700' :
+                  ['disbursed','repaying'].includes(loan.status) ? 'bg-green-50 text-green-700' :
+                  loan.status === 'completed' ? 'bg-gray-50 text-gray-600' :
+                  loan.status === 'rejected'  ? 'bg-red-50 text-red-700'   : 'bg-yellow-50 text-yellow-700'
+                }`}>
+                  {LOAN_MSG[loan.status] || `Status: ${loan.status}`}
+                </div>
 
-          {/* floating centre button */}
-          <div className="flex flex-col items-center -mt-8">
-            <button
-              onClick={() =>
-                navigate('/farmer/harvest/new')
-              }
-              className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center shadow-xl border-4 border-white active:bg-green-700"
-            >
-              <span className="text-white text-3xl font-black">
-                +
-              </span>
-            </button>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[
+                    { label: 'Principal',   value: `KES ${Number(loan.principalAmount).toLocaleString()}` },
+                    { label: 'Balance',     value: `KES ${bal.toLocaleString()}` },
+                    { label: 'Monthly',     value: `KES ${Number(loan.monthlyInstallment).toLocaleString()}` },
+                    { label: 'Total Paid',  value: `KES ${paid.toLocaleString()}` },
+                  ].map(r => (
+                    <div key={r.label} className="bg-gray-50 rounded-xl p-3">
+                      <p className="text-xs text-gray-400">{r.label}</p>
+                      <p className="font-black text-sm text-gray-900">{r.value}</p>
+                    </div>
+                  ))}
+                </div>
 
-            <span className="text-xs text-gray-400 mt-1">
-              Schedule
+                {pct > 0 && (
+                  <div className="mb-3">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-gray-500">Repayment Progress</span>
+                      <span className="font-bold text-green-600">{pct}%</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-2.5">
+                      <div className="h-2.5 rounded-full bg-gradient-to-r from-green-500 to-green-400 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {loan.dueDate && (
+                  <p className="text-xs text-orange-600 font-medium mb-3">
+                    📅 Due: {new Date(loan.dueDate).toLocaleDateString('en-KE')}
+                  </p>
+                )}
+
+                {['disbursed','repaying'].includes(loan.status) && (
+                  <button onClick={() => navigate(`/farmer/mpesa?type=repay&loanId=${loan.id}&loanNumber=${loan.loanNumber}`)}
+                    className="w-full bg-green-600 text-white text-sm font-bold py-3 rounded-xl">
+                    📱 Repay via M-Pesa
+                  </button>
+                )}
+
+                {loan.status === 'completed' && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                    <p className="text-green-700 font-bold text-sm">🎉 Fully repaid! Apply for a new loan.</p>
+                    <button onClick={() => navigate('/farmer/loan/apply')}
+                      className="mt-2 bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl">
+                      Apply for New Loan
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+
+  // ── PROFILE ──────────────────────────────────────────────────────────────────
+  const ProfileTab = () => (
+    <div className="px-4 pt-4 pb-24 space-y-4">
+      {/* Profile hero */}
+      <div className="bg-gradient-to-br from-green-800 to-green-600 rounded-3xl p-6 text-white shadow-xl">
+        <div className="flex items-center gap-4">
+          <div className="w-20 h-20 bg-white/20 rounded-3xl flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-4xl font-black">{String(mem?.fullName || 'U').charAt(0)}</span>
+          </div>
+          <div>
+            <h2 className="text-2xl font-black">{mem?.fullName}</h2>
+            <p className="text-green-200 text-sm">{mem?.memberNumber}</p>
+            <span className={`inline-block mt-1 px-3 py-0.5 rounded-full text-xs font-bold ${mem?.status === 'active' ? 'bg-green-500' : 'bg-red-500'} text-white`}>
+              {mem?.status === 'active' ? '✓ Active Member' : mem?.status}
             </span>
           </div>
+        </div>
+      </div>
 
-          <NavBtn
-            emoji="💵"
-            label="Savings"
-            active={activeTab === 'savings'}
-            onClick={() => setActiveTab('savings')}
-          />
+      {/* Details */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <p className="font-black text-gray-900 mb-3">Account Details</p>
+        {[
+          { icon: '📱', label: 'Phone',         value: mem?.phoneNumber },
+          { icon: '📍', label: 'Village',       value: mem?.village },
+          { icon: '🏛️', label: 'Ward',          value: mem?.ward },
+          { icon: '🔢', label: 'Member No.',    value: mem?.memberNumber },
+          { icon: '📊', label: 'Loan Score',    value: `${mem?.loanScore || 0}/100` },
+          { icon: '🌿', label: 'Total Harvests', value: String(harvests.length) },
+        ].map(r => (
+          <div key={r.label} className="flex justify-between items-center py-2.5 border-b border-gray-50 last:border-0">
+            <span className="text-gray-500 text-sm">{r.icon} {r.label}</span>
+            <span className="font-bold text-gray-900 text-sm">{r.value || '—'}</span>
+          </div>
+        ))}
+      </div>
 
-          <NavBtn
-            emoji="👤"
-            label="Profile"
-            active={false}
-            onClick={() =>
-              navigate('/farmer/profile')
-            }
-          />
+      {/* Settings */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <p className="font-black text-gray-900 mb-3">Settings</p>
+        <button onClick={() => navigate('/forgot-pin')}
+          className="w-full text-left flex items-center justify-between py-3 border-b border-gray-50 active:bg-gray-50 rounded-xl px-2">
+          <span className="text-gray-700 text-sm">🔒 Change PIN</span>
+          <span className="text-gray-400 text-lg">›</span>
+        </button>
+        <button onClick={() => { logout(); navigate('/login', { replace: true }) }}
+          className="w-full bg-red-50 border border-red-200 text-red-600 font-bold py-3 rounded-2xl text-sm mt-3">
+          🚪 Sign Out
+        </button>
+      </div>
+
+      {/* Help */}
+      <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+        <p className="text-green-700 text-sm font-medium">Need help? Contact us</p>
+        <a href="tel:0757630995" className="block font-black text-green-700 text-xl mt-1">📞 0757 630 995</a>
+        <p className="text-green-500 text-xs mt-1">Mon–Fri · 8:00am – 5:00pm</p>
+      </div>
+    </div>
+  )
+
+  // ── BOTTOM NAV + RENDER ──────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="pb-20">
+        {tab === 'home'     && <HomeTab />}
+        {tab === 'harvests' && <HarvestsTab />}
+        {tab === 'savings'  && <SavingsTab />}
+        {tab === 'loans'    && <LoansTab />}
+        {tab === 'profile'  && <ProfileTab />}
+      </div>
+
+      {/* Fixed bottom navigation */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 shadow-xl">
+        <div className="flex justify-around items-center px-2 py-2 max-w-lg mx-auto">
+          {([
+            { id: 'home',     emoji: '🏠', label: 'Home'     },
+            { id: 'harvests', emoji: '🌿', label: 'Harvests' },
+            { id: 'savings',  emoji: '💵', label: 'Savings'  },
+            { id: 'loans',    emoji: '💰', label: 'Loans'    },
+            { id: 'profile',  emoji: '👤', label: 'Profile'  },
+          ] as { id: Tab; emoji: string; label: string }[]).map(item => (
+            <button key={item.id} onClick={() => setTab(item.id)}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-all min-w-[56px] ${tab === item.id ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}>
+              <span className={`text-xl transition-transform ${tab === item.id ? 'scale-110' : ''}`}>{item.emoji}</span>
+              <span className={`text-[10px] font-bold ${tab === item.id ? 'text-green-600' : 'text-gray-400'}`}>{item.label}</span>
+              {tab === item.id && <div className="w-1.5 h-1.5 bg-green-600 rounded-full" />}
+            </button>
+          ))}
         </div>
       </div>
     </div>

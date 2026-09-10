@@ -3,289 +3,190 @@ import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
 
-type Mode = 'login' | 'forgot' | 'reset'
-
 export default function MobileLoginPage() {
   const navigate = useNavigate()
-  const { login } = useMobileStore()
-  const [mode, setMode] = useState<Mode>('login')
+  const { setAuth } = useMobileStore()
 
-  // Login state
-  const [phone, setPhone] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [pin, setPin] = useState('')
-  const [showPin, setShowPin] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [imgLoaded, setImgLoaded] = useState(false)
-
-  // Forgot/Reset state
-  const [resetPhone, setResetPhone] = useState('')
-  const [resetCode, setResetCode] = useState('')
-  const [newPin, setNewPin] = useState('')
-  const [confirmPin, setConfirmPin] = useState('')
-  const [resetStep, setResetStep] = useState<1 | 2>(1)
-  const [resetLoading, setResetLoading] = useState(false)
-  const [resetMsg, setResetMsg] = useState('')
-  const [resetError, setResetError] = useState('')
+  const [showPin, setShowPin] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (pin.length !== 4) { setError('PIN must be exactly 4 digits'); return }
-    setLoading(true)
     setError('')
+    const cleanPhone = phoneNumber.replace(/\s/g, '').trim()
+    if (!cleanPhone) { setError('Enter your phone number'); return }
+    if (!pin || pin.length !== 4) { setError('Enter your 4-digit PIN'); return }
+
+    setLoading(true)
     try {
-      const r = await api.post('/api/mobile/login', { phoneNumber: phone, pin })
-      const { token, roles, member, agent, driver } = r.data
-      login(token, member, agent || driver, roles)
-      if (roles.length > 1) navigate('/select-role')
-      else if (roles[0] === 'farmer') navigate('/farmer')
-      else navigate('/agent')
+      const res = await api.post('/api/mobile/login', { phoneNumber: cleanPhone, pin })
+      const data = res.data
+      setAuth({
+        token:  data.token,
+        roles:  data.roles  || [],
+        member: data.member || null,
+        agent:  data.agent  || null,
+        driver: data.driver || null
+      })
+      if (data.roles?.includes('farmer')) navigate('/farmer', { replace: true })
+      else if (data.roles?.includes('agent')) navigate('/agent', { replace: true })
+      else setError('Account type not recognized. Contact SACCO.')
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Check your phone number and PIN.')
+      setError(err.response?.data?.error || 'Login failed. Check your number and PIN.')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleForgotPin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setResetLoading(true)
-    setResetError('')
-    setResetMsg('')
-    try {
-      const r = await api.post('/api/mobile/forgot-pin', { phoneNumber: resetPhone })
-      setResetMsg(r.data.message || 'Reset code sent!')
-      if (r.data.debugCode) setResetCode(r.data.debugCode) // dev only
-      setResetStep(2)
-    } catch (err: any) {
-      setResetError(err.response?.data?.error || 'Failed. Check your phone number.')
-    } finally {
-      setResetLoading(false)
-    }
-  }
-
-  const handleResetPin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (newPin.length !== 4) { setResetError('PIN must be 4 digits'); return }
-    if (newPin !== confirmPin) { setResetError('PINs do not match'); return }
-    setResetLoading(true)
-    setResetError('')
-    try {
-      await api.post('/api/mobile/reset-pin', { phoneNumber: resetPhone, resetCode, newPin })
-      setResetMsg('PIN reset successfully! You can now login.')
-      setTimeout(() => {
-        setMode('login')
-        setResetStep(1)
-        setResetPhone('')
-        setResetCode('')
-        setNewPin('')
-        setConfirmPin('')
-        setResetMsg('')
-      }, 2500)
-    } catch (err: any) {
-      setResetError(err.response?.data?.error || 'Failed. Check your reset code.')
-    } finally {
-      setResetLoading(false)
-    }
-  }
-
-  const BgOverlay = () => (
-    <div className="absolute inset-0 pointer-events-none">
-      <img src="/miraa.jpg" alt=""
-        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
-        style={{ opacity: imgLoaded ? 0.50 : 0 }}
-        onLoad={() => setImgLoaded(true)}
-        onError={() => {}} />
-      <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, rgba(20,83,45,0.70) 0%, rgba(20,83,45,0.45) 50%, rgba(20,83,45,0.80) 100%)' }} />
-    </div>
-  )
-
-  // ── FORGOT PIN ─────────────────────────────────────────────────────────────
-  if (mode === 'forgot') return (
-    <div className="min-h-screen w-full flex flex-col lg:flex-row relative overflow-hidden" style={{ backgroundColor: '#14532d' }}>
-      <BgOverlay />
-      <div className="relative z-10 flex items-center justify-center w-full min-h-screen px-4 py-12">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-orange-600 to-orange-500 px-6 py-5">
-              <button onClick={() => { setMode('login'); setResetStep(1); setResetError(''); setResetMsg('') }}
-                className="text-orange-200 text-sm mb-2">← Back to Login</button>
-              <h2 className="text-xl font-black text-white">🔐 Reset PIN</h2>
-              <p className="text-orange-200 text-sm">{resetStep === 1 ? 'Enter your registered phone number' : 'Enter the code sent to your phone'}</p>
-            </div>
-            <div className="p-6">
-              {resetMsg && (
-                <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-4 text-sm">
-                  ✅ {resetMsg}
-                </div>
-              )}
-              {resetError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 text-sm">
-                  ⚠️ {resetError}
-                </div>
-              )}
-
-              {resetStep === 1 ? (
-                <form onSubmit={handleForgotPin} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">📱 Registered Phone Number</label>
-                    <input type="tel" value={resetPhone} onChange={e => setResetPhone(e.target.value)}
-                      placeholder="e.g. 0712345678" required
-                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-lg focus:outline-none focus:border-orange-500" />
-                  </div>
-                  <button type="submit" disabled={resetLoading || !resetPhone}
-                    className="w-full bg-orange-600 disabled:bg-orange-300 text-white font-black py-4 rounded-2xl text-lg">
-                    {resetLoading ? 'Sending...' : 'Send Reset Code →'}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleResetPin} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">📨 Reset Code (from SMS)</label>
-                    <input type="text" value={resetCode} onChange={e => setResetCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder="6-digit code" maxLength={6} required
-                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-2xl tracking-widest text-center focus:outline-none focus:border-orange-500" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">🔐 New 4-Digit PIN</label>
-                    <input type="password" value={newPin}
-                      onChange={e => { const v = e.target.value.replace(/\D/g, ''); if (v.length <= 4) setNewPin(v) }}
-                      placeholder="••••" maxLength={4} inputMode="numeric" required
-                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-3xl tracking-widest text-center focus:outline-none focus:border-orange-500" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">🔐 Confirm New PIN</label>
-                    <input type="password" value={confirmPin}
-                      onChange={e => { const v = e.target.value.replace(/\D/g, ''); if (v.length <= 4) setConfirmPin(v) }}
-                      placeholder="••••" maxLength={4} inputMode="numeric" required
-                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-3xl tracking-widest text-center focus:outline-none focus:border-orange-500" />
-                    {newPin && confirmPin && newPin !== confirmPin && (
-                      <p className="text-red-500 text-xs mt-1">PINs do not match</p>
-                    )}
-                  </div>
-                  <button type="submit"
-                    disabled={resetLoading || resetCode.length < 6 || newPin.length < 4 || newPin !== confirmPin}
-                    className="w-full bg-green-600 disabled:bg-green-300 text-white font-black py-4 rounded-2xl text-lg">
-                    {resetLoading ? 'Resetting...' : '✅ Reset PIN'}
-                  </button>
-                  <button type="button" onClick={() => setResetStep(1)}
-                    className="w-full border-2 border-gray-200 text-gray-600 font-bold py-3 rounded-2xl">
-                    ← Resend Code
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
-  // ── LOGIN ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen w-full flex flex-col lg:flex-row relative overflow-hidden" style={{ backgroundColor: '#14532d' }}>
-      <BgOverlay />
+    <div className="min-h-screen relative flex flex-col overflow-hidden">
+      {/* ── Miraa farm background ── */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `url('https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?w=800&q=80')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        }}
+      />
+      {/* Fallback gradient (shown while image loads) */}
+      <div className="absolute inset-0 bg-gradient-to-b from-green-900 via-green-800 to-green-900" style={{ zIndex: -1 }} />
+      {/* Dark overlay for readability */}
+      <div className="absolute inset-0 bg-gradient-to-b from-green-950/80 via-green-900/75 to-green-950/90" />
 
-      {/* Hero — left on desktop */}
-      <div className="relative z-10 flex flex-col justify-center px-8 py-12 lg:w-1/2 lg:min-h-screen">
-        <div className="max-w-lg">
-          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-8 shadow-2xl">
-            <span className="text-green-700 text-3xl font-black">IG</span>
-          </div>
-          <h1 className="text-5xl lg:text-6xl font-black text-white leading-tight mb-3 drop-shadow-lg">
-            Igembe SACCO
-          </h1>
-          <p className="text-xl text-green-200 font-medium mb-2">Farmer & Agent Portal</p>
-          <p className="text-green-300 mb-8">🌿 Igembe South, Meru County</p>
-          <div className="hidden lg:grid grid-cols-2 gap-3">
-            {[
-              { icon: '📊', t: 'Live Miraa Prices', d: 'Grade 1, 2 & Gomba daily' },
-              { icon: '💰', t: 'M-Pesa Payments', d: 'Instant deposits & withdrawals' },
-              { icon: '🧑‍🌾', t: 'Harvest Tracking', d: 'Real-time agent updates' },
-              { icon: '🌱', t: 'AgroVet Shop', d: 'Order farm inputs online' },
-            ].map((f, i) => (
-              <div key={i} className="rounded-2xl p-4" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}>
-                <span className="text-2xl">{f.icon}</span>
-                <p className="text-white font-bold text-sm mt-1">{f.t}</p>
-                <p className="text-green-200 text-xs">{f.d}</p>
+      {/* ── Content ── */}
+      <div className="relative z-10 flex flex-col min-h-screen">
+        <div className="flex-1 flex flex-col items-center justify-center px-5 pt-16 pb-6">
+
+          {/* Logo */}
+          <div className="mb-6 flex flex-col items-center">
+            <div className="w-24 h-24 bg-white rounded-3xl shadow-2xl flex items-center justify-center border-4 border-green-400/60 mb-4">
+              <div className="text-center leading-tight">
+                <p className="text-green-700 text-3xl font-black">IG</p>
+                <p className="text-green-500 text-[10px] font-extrabold tracking-widest">SACCO</p>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Login form — right on desktop */}
-      <div className="relative z-10 flex items-center justify-center lg:w-1/2 lg:min-h-screen px-4 pb-8 lg:pb-0">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-green-700 to-green-600 px-6 py-5">
-              <h2 className="text-xl font-black text-white">Sign In</h2>
-              <p className="text-green-200 text-sm">Phone number & 4-digit PIN</p>
             </div>
-            <div className="p-6">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 text-sm flex items-start gap-2">
-                  <span>⚠️</span><span>{error}</span>
-                </div>
-              )}
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">📱 Phone Number</label>
-                  <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
-                    placeholder="e.g. 0712345678" required
-                    className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-lg focus:outline-none focus:border-green-500 bg-gray-50" />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    🔐 4-Digit PIN
-                    <span className="text-green-600 text-xs ml-2 font-normal">(First time? Your PIN will be set on login)</span>
-                  </label>
-                  <div className="relative">
-                    <input type={showPin ? 'text' : 'password'} value={pin}
-                      onChange={e => { const v = e.target.value.replace(/\D/g, ''); if (v.length <= 4) setPin(v) }}
-                      placeholder="••••" maxLength={4} required inputMode="numeric"
-                      className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl text-3xl tracking-widest text-center focus:outline-none focus:border-green-500 bg-gray-50 pr-12" />
-                    <button type="button" onClick={() => setShowPin(!showPin)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl">
-                      {showPin ? '🙈' : '👁️'}
-                    </button>
-                  </div>
-                  <div className="flex justify-center gap-2 mt-3">
-                    {[0, 1, 2, 3].map(i => (
-                      <div key={i} className={`w-3 h-3 rounded-full transition-all ${pin.length > i ? 'bg-green-600 scale-110' : 'bg-gray-200'}`} />
-                    ))}
-                  </div>
-                </div>
-                <button type="submit" disabled={loading || pin.length !== 4}
-                  className="w-full text-white font-black py-4 rounded-2xl text-xl transition-all shadow-lg"
-                  style={{ backgroundColor: pin.length === 4 && !loading ? '#16a34a' : '#86efac' }}>
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                      </svg>
-                      Signing in...
-                    </span>
-                  ) : 'Sign In →'}
-                </button>
-              </form>
+            <h1 className="text-white text-3xl font-black text-center drop-shadow-xl tracking-tight">
+              Igembe SACCO
+            </h1>
+            <p className="text-green-300 text-sm text-center mt-1">
+              🌿 Miraa Farmers Cooperative Society
+            </p>
+          </div>
 
-              <div className="mt-5 space-y-3">
-                <button onClick={() => { setMode('forgot'); setResetPhone(phone); setResetError(''); setResetMsg('') }}
-                  className="w-full text-orange-600 text-sm font-semibold py-3 border-2 border-orange-200 rounded-xl hover:bg-orange-50 flex items-center justify-center gap-2">
-                  🔐 Forgot PIN? Click here to reset
-                </button>
-                <p className="text-center text-xs text-gray-400">
-                  Not registered?{' '}
-                  <a href="https://igembe-dashboard.netlify.app/register" className="text-green-600 font-semibold">
-                    Register as SACCO Member →
-                  </a>
+          {/* Card */}
+          <div className="w-full max-w-sm bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-white/30 p-7">
+            <h2 className="text-xl font-black text-gray-900">Welcome Back 👋</h2>
+            <p className="text-gray-400 text-xs mt-0.5 mb-5">Sign in with your registered phone number</p>
+
+            {/* Error */}
+            {error && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm mb-4">
+                <span className="flex-shrink-0 mt-0.5">⚠️</span>
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Phone */}
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">📱</span>
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={e => setPhoneNumber(e.target.value)}
+                    placeholder="0712 345 678"
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    required
+                    className="w-full pl-10 pr-4 py-3.5 border-2 border-gray-200 rounded-2xl text-sm font-medium text-gray-900 placeholder-gray-300 focus:outline-none focus:border-green-500 bg-gray-50/80 transition-colors"
+                  />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Use your number registered with SACCO</p>
+              </div>
+
+              {/* PIN */}
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                  4-Digit PIN
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPin ? 'text' : 'password'}
+                    value={pin}
+                    onChange={e => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                    placeholder="••••"
+                    inputMode="numeric"
+                    maxLength={4}
+                    required
+                    className="w-full px-6 pr-14 py-4 border-2 border-gray-200 rounded-2xl text-4xl font-black tracking-[0.4em] text-center text-gray-900 focus:outline-none focus:border-green-500 bg-gray-50/80 transition-colors"
+                  />
+                  <button type="button" onClick={() => setShowPin(v => !v)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl select-none">
+                    {showPin ? '🙈' : '👁️'}
+                  </button>
+                </div>
+                {/* PIN dots */}
+                <div className="flex justify-center gap-3 mt-2.5">
+                  {[0,1,2,3].map(i => (
+                    <div key={i}
+                      className={`w-3 h-3 rounded-full transition-all duration-200 ${pin.length > i ? 'bg-green-600 scale-125' : 'bg-gray-200'}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Hint */}
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
+                <p className="text-xs text-blue-700">
+                  <span className="font-bold">First time?</span> Enter any 4-digit PIN — it becomes your permanent PIN automatically.
                 </p>
               </div>
-              <p className="text-center text-xs text-gray-300 mt-5">© 2026 Igembe Tech Solutions Ltd</p>
+
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={loading || pin.length !== 4}
+                className="w-full bg-green-600 disabled:bg-green-300 text-white font-black py-4 rounded-2xl text-lg shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    Signing in...
+                  </>
+                ) : 'Sign In →'}
+              </button>
+            </form>
+
+            <div className="mt-4 text-center">
+              <button onClick={() => navigate('/forgot-pin')}
+                className="text-green-600 text-sm font-bold hover:text-green-700 transition-colors">
+                Forgot PIN? Reset it →
+              </button>
             </div>
           </div>
+
+          {/* Contact */}
+          <div className="mt-5 text-center">
+            <p className="text-green-400 text-xs">Not registered? Visit Igembe SACCO office</p>
+            <p className="text-green-300 text-sm font-bold mt-1">📞 0757 630 995</p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="relative pb-5 text-center">
+          <p className="text-green-600/80 text-xs">© 2024 Igembe SACCO · Powered by Igembe Tech Solutions</p>
         </div>
       </div>
     </div>
