@@ -1,19 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
+import LanguageSwitcher from '../components/LanguageSwitcher'
+import NotificationBell from '../components/NotificationBell'
+import HarvestStepper from '../components/HarvestStepper'
+import { useT } from '../lib/useT'
 import api from '../lib/api'
 
 type Tab = 'home' | 'harvests' | 'savings' | 'loans' | 'profile'
 
-const STATUS_LABEL: Record<string, string> = {
-  scheduled:          '⏳ Waiting for agent',
-  confirmed:          '✅ Agent assigned',
-  harvesting:         '🌿 Harvesting now',
-  picked_up:          '🚗 In transit',
-  delivered_to_sacco: '🏭 At SACCO',
-  graded:             '📊 Graded — payment pending',
-  paid:               '💰 Paid!'
-}
 const STATUS_COLORS: Record<string, string> = {
   scheduled:          'bg-yellow-100 text-yellow-800',
   confirmed:          'bg-blue-100 text-blue-800',
@@ -22,14 +17,6 @@ const STATUS_COLORS: Record<string, string> = {
   delivered_to_sacco: 'bg-orange-100 text-orange-800',
   graded:             'bg-teal-100 text-teal-800',
   paid:               'bg-green-100 text-green-800'
-}
-const LOAN_MSG: Record<string, string> = {
-  pending:   '⏳ Under review. You will be notified of the decision.',
-  approved:  '✅ Approved! Disbursement is being processed.',
-  disbursed: '💸 Disbursed to your M-Pesa. Start making monthly repayments.',
-  repaying:  '📈 On track — keep up with monthly repayments!',
-  completed: '🎉 Fully repaid! You are eligible for a new loan.',
-  rejected:  '❌ Not approved this time. Visit SACCO for details.'
 }
 
 function Spinner({ size = 6, cls = 'text-green-600' }: { size?: number; cls?: string }) {
@@ -58,6 +45,7 @@ function MiniBar({ value, max, color = '#16a34a', label = '' }: { value: number;
 export default function FarmerDashboard() {
   const navigate  = useNavigate()
   const { member, logout } = useMobileStore()
+  const t = useT()
 
   const [tab, setTab]           = useState<Tab>('home')
   const [data, setData]         = useState<any>(null)
@@ -68,8 +56,8 @@ export default function FarmerDashboard() {
   useEffect(() => {
     if (!member?.id) { navigate('/login', { replace: true }); return }
     load()
-    const t = setInterval(() => load(false), 60_000)
-    return () => clearInterval(t)
+    const interval = setInterval(() => load(false), 60_000)
+    return () => clearInterval(interval)
   }, [member?.id])
 
   const load = useCallback(async (spinner = true) => {
@@ -94,7 +82,7 @@ export default function FarmerDashboard() {
         <span className="text-white text-3xl font-black">IG</span>
       </div>
       <Spinner size={8} />
-      <p className="text-gray-400 text-sm">Loading your dashboard...</p>
+      <p className="text-gray-400 text-sm">{t('common.loading')}</p>
     </div>
   )
 
@@ -102,7 +90,7 @@ export default function FarmerDashboard() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 gap-4">
       <p className="text-5xl">⚠️</p>
       <p className="font-bold text-gray-900 text-center">{error}</p>
-      <button onClick={() => load()} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold">Retry</button>
+      <button onClick={() => load()} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold">{t('common.retry')}</button>
     </div>
   )
 
@@ -122,6 +110,17 @@ export default function FarmerDashboard() {
   const shareBal   = Number(shareCapital.balance || 0)
   const activeLoan = allLoans.find((l: any) => ['disbursed','repaying'].includes(l.status))
   const latestH    = harvests[0]
+
+  // Next upcoming pickup — earliest scheduled/confirmed harvest by date
+  const upcomingHarvest = harvests
+    .filter((h: any) => ['scheduled', 'confirmed'].includes(h.status) && h.harvestDate)
+    .sort((a: any, b: any) => new Date(a.harvestDate).getTime() - new Date(b.harvestDate).getTime())[0]
+
+  const daysUntilHarvest = (dateStr: string) => {
+    const target = new Date(dateStr); target.setHours(0, 0, 0, 0)
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    return Math.round((target.getTime() - today.getTime()) / 86400000)
+  }
 
   // Analytics for harvest tab
   const paidHarvests     = harvests.filter((h: any) => h.status === 'paid')
@@ -156,6 +155,7 @@ export default function FarmerDashboard() {
               className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
               {refreshing ? <Spinner size={4} cls="text-white" /> : <span className="text-white">🔄</span>}
             </button>
+            <NotificationBell />
             <button onClick={() => setTab('profile')}
               className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
               <span className="text-white text-sm font-black">{String(mem?.fullName || 'U').charAt(0)}</span>
@@ -165,11 +165,11 @@ export default function FarmerDashboard() {
 
         {/* Balance card */}
         <div className="mt-5 bg-white/15 backdrop-blur-sm rounded-3xl p-4 border border-white/20">
-          <p className="text-green-200 text-xs">Total Savings</p>
+          <p className="text-green-200 text-xs">{t('farmerHome.balanceLabel')}</p>
           <p className="text-white text-4xl font-black mt-0.5">KES {totalSav.toLocaleString()}</p>
           <div className="flex gap-4 mt-2">
-            <div><p className="text-green-300 text-xs">Share Capital</p><p className="text-white text-sm font-bold">KES {shareBal.toLocaleString()}</p></div>
-            <div><p className="text-green-300 text-xs">Harvest Earnings</p><p className="text-white text-sm font-bold">KES {Number(mem?.harvestAccountBalance || 0).toLocaleString()}</p></div>
+            <div><p className="text-green-300 text-xs">{t('farmerHome.shareCapital')}</p><p className="text-white text-sm font-bold">KES {shareBal.toLocaleString()}</p></div>
+            <div><p className="text-green-300 text-xs">{t('farmerHome.harvestEarnings')}</p><p className="text-white text-sm font-bold">KES {Number(mem?.harvestAccountBalance || 0).toLocaleString()}</p></div>
           </div>
         </div>
       </div>
@@ -178,10 +178,10 @@ export default function FarmerDashboard() {
       <div className="px-4 -mt-12 mb-4">
         <div className="grid grid-cols-4 gap-3">
           {[
-            { emoji: '📥', label: 'Deposit',  bg: 'bg-green-600',  action: () => navigate('/farmer/mpesa?type=deposit') },
-            { emoji: '💸', label: 'Withdraw', bg: 'bg-blue-600',   action: () => navigate('/farmer/mpesa?type=withdraw') },
-            { emoji: '🌿', label: 'Schedule', bg: 'bg-teal-600',   action: () => navigate('/farmer/harvest/schedule') },
-            { emoji: '🛒', label: 'AgroVet',  bg: 'bg-orange-500', action: () => navigate('/farmer/agrovet') },
+            { emoji: '📥', label: t('common.deposit'),         bg: 'bg-green-600',  action: () => navigate('/farmer/mpesa?type=deposit') },
+            { emoji: '💸', label: t('common.withdraw'),        bg: 'bg-blue-600',   action: () => navigate('/farmer/mpesa?type=withdraw') },
+            { emoji: '🌿', label: t('farmerHome.schedule'),    bg: 'bg-teal-600',   action: () => navigate('/farmer/harvest/schedule') },
+            { emoji: '🛒', label: t('farmerHome.agrovet'),     bg: 'bg-orange-500', action: () => navigate('/farmer/agrovet') },
           ].map(item => (
             <button key={item.label} onClick={item.action}
               className={`${item.bg} rounded-2xl p-3.5 shadow-lg flex flex-col items-center gap-1.5 active:scale-95 transition-transform`}>
@@ -209,20 +209,48 @@ export default function FarmerDashboard() {
         {/* Harvest limit */}
         {todayLimit && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-            <p className="font-bold text-amber-800 text-sm">⚠️ Today's Harvest Limit</p>
+            <p className="font-bold text-amber-800 text-sm">{t('farmerHome.todayLimitTitle')}</p>
             <p className="text-amber-700 text-xs mt-1">
-              Maximum: {todayLimit.maxWeightKg} kg per farmer today
+              {t('farmerHome.todayLimitMax', { max: todayLimit.maxWeightKg })}
               {todayLimit.notes && ` · ${todayLimit.notes}`}
             </p>
           </div>
         )}
 
+        {/* Next harvest pickup countdown */}
+        {upcomingHarvest && (() => {
+          const days = daysUntilHarvest(upcomingHarvest.harvestDate)
+          const countdownText =
+            days === 0 ? t('farmerHome.countdownToday') :
+            days === 1 ? t('farmerHome.countdownTomorrow') :
+            days > 1  ? t('farmerHome.countdownDays', { days }) :
+            t('farmerHome.countdownOverdue')
+          return (
+            <div className="bg-gradient-to-br from-teal-600 to-teal-500 rounded-2xl p-4 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
+                  <span className="text-2xl">🌿</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-white text-sm leading-snug">{countdownText}</p>
+                  <p className="text-teal-100 text-xs mt-0.5">
+                    {upcomingHarvest.harvestNumber} · {new Date(upcomingHarvest.harvestDate).toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' })}
+                  </p>
+                  {upcomingHarvest.agentName && (
+                    <p className="text-teal-100 text-xs mt-0.5">{t('farmerHome.agentLabel', { name: upcomingHarvest.agentName })}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Latest harvest */}
         {latestH && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="flex justify-between items-center px-4 py-3 bg-gray-50 border-b border-gray-100">
-              <span className="font-black text-gray-900 text-sm">Latest Harvest</span>
-              <button onClick={() => setTab('harvests')} className="text-green-600 text-xs font-bold">View All →</button>
+              <span className="font-black text-gray-900 text-sm">{t('farmerHome.latestHarvest')}</span>
+              <button onClick={() => setTab('harvests')} className="text-green-600 text-xs font-bold">{t('common.viewAll')} →</button>
             </div>
             <div className="p-4">
               <div className="flex justify-between items-start">
@@ -234,11 +262,11 @@ export default function FarmerDashboard() {
                   {latestH.farmLocation && <p className="text-gray-400 text-xs">📍 {latestH.farmLocation}</p>}
                 </div>
                 <span className={`text-xs px-2 py-1 rounded-full font-bold ${STATUS_COLORS[latestH.status] || 'bg-gray-100 text-gray-600'}`}>
-                  {STATUS_LABEL[latestH.status] || latestH.status}
+                  {t(`status.${latestH.status}`)}
                 </span>
               </div>
               {latestH.agentName && (
-                <p className="text-blue-600 text-xs mt-2">🧑‍🌾 Agent: {latestH.agentName}</p>
+                <p className="text-blue-600 text-xs mt-2">{t('farmerHome.agentLabel', { name: latestH.agentName })}</p>
               )}
             </div>
           </div>
@@ -247,7 +275,7 @@ export default function FarmerDashboard() {
         {/* Miraa prices */}
         {prices.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <p className="font-black text-gray-900 mb-3">📊 Today's Miraa Prices</p>
+            <p className="font-black text-gray-900 mb-3">{t('farmerHome.todayPrices')}</p>
             <div className="grid grid-cols-3 gap-2">
               {prices.map((p: any) => (
                 <div key={p.id} className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
@@ -264,7 +292,7 @@ export default function FarmerDashboard() {
         {activeLoan && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
             <div className="flex justify-between items-center mb-2">
-              <p className="font-black text-gray-900">💰 Active Loan</p>
+              <p className="font-black text-gray-900">{t('farmerHome.activeLoan')}</p>
               <span className={`text-xs px-2 py-1 rounded-full font-bold capitalize ${activeLoan.status === 'repaying' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{activeLoan.status}</span>
             </div>
             <div className="flex justify-between text-sm mb-3">
@@ -273,11 +301,20 @@ export default function FarmerDashboard() {
             </div>
             <button onClick={() => navigate(`/farmer/mpesa?type=repay&loanId=${activeLoan.id}&loanNumber=${activeLoan.loanNumber}`)}
               className="w-full bg-green-600 text-white text-sm font-bold py-2.5 rounded-xl">
-              📱 Repay via M-Pesa
+              {t('farmerHome.repayMpesa')}
             </button>
           </div>
         )}
       </div>
+
+      {/* Floating quick-schedule button */}
+      <button
+        onClick={() => navigate('/farmer/harvest/schedule')}
+        aria-label={t('farmerHarvests.scheduleNow')}
+        className="fixed bottom-24 right-5 w-16 h-16 bg-green-600 rounded-full shadow-2xl flex items-center justify-center text-white active:scale-95 transition-transform z-40"
+      >
+        <span className="text-4xl font-light leading-none -mt-1">+</span>
+      </button>
     </div>
   )
 
@@ -291,11 +328,11 @@ export default function FarmerDashboard() {
           <div className="flex gap-2 bg-gray-100 rounded-2xl p-1">
             <button onClick={() => setView('list')}
               className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${view === 'list' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500'}`}>
-              🌿 My Harvests
+              {t('farmerHarvests.myHarvests')}
             </button>
             <button onClick={() => setView('analytics')}
               className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${view === 'analytics' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500'}`}>
-              📊 My Analytics
+              {t('farmerHarvests.myAnalytics')}
             </button>
           </div>
         </div>
@@ -303,38 +340,49 @@ export default function FarmerDashboard() {
         {view === 'list' ? (
           <div className="px-4 space-y-4">
             <div className="flex justify-between items-center">
-              <p className="font-black text-gray-900">Recent Harvests ({harvests.length})</p>
+              <p className="font-black text-gray-900">{t('farmerHarvests.recentHarvests', { count: harvests.length })}</p>
               <button onClick={() => navigate('/farmer/harvest/schedule')}
                 className="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">
-                + Schedule
+                {t('farmerHarvests.scheduleBtn')}
               </button>
             </div>
 
             {harvests.length === 0 ? (
               <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
                 <p className="text-5xl mb-4">🌿</p>
-                <p className="font-bold text-gray-900">No harvests yet</p>
-                <p className="text-gray-400 text-sm mt-1">Schedule your first harvest pickup</p>
+                <p className="font-bold text-gray-900">{t('farmerHarvests.noHarvests')}</p>
+                <p className="text-gray-400 text-sm mt-1">{t('farmerHarvests.scheduleFirst')}</p>
                 <button onClick={() => navigate('/farmer/harvest/schedule')}
                   className="mt-4 bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">
-                  Schedule Now →
+                  {t('farmerHarvests.scheduleNow')}
                 </button>
               </div>
             ) : (
               harvests.map((h: any) => {
                 const totalVal = (h.items || []).reduce((s: number, i: any) => s + Number(i.totalValue || 0), 0)
+                const totalKgH = (h.items || []).reduce((s: number, i: any) => s + Number(i.weightKg || 0), 0)
+                const paymentSentence = h.status === 'paid' && (h.items || []).length > 0
+                  ? t('farmerHarvests.paymentBreakdown', {
+                      kg: totalKgH,
+                      breakdown: h.items.map((item: any) => `${item.miraaGrade} (${item.weightKg} kg = KES ${Number(item.totalValue).toLocaleString()})`).join(' + '),
+                      total: totalVal.toLocaleString()
+                    })
+                  : null
                 return (
                   <div key={h.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className={`flex justify-between items-center px-4 py-2.5 ${STATUS_COLORS[h.status] || 'bg-gray-100'}`}>
                       <span className="font-black text-sm">{h.harvestNumber}</span>
-                      <span className="text-xs font-bold">{STATUS_LABEL[h.status] || h.status}</span>
+                      <span className="text-xs font-bold">{t(`status.${h.status}`)}</span>
                     </div>
-                    <div className="p-4 space-y-1.5">
+                    <div className="px-4 pt-3">
+                      <HarvestStepper status={h.status} />
+                    </div>
+                    <div className="p-4 pt-1 space-y-1.5">
                       {h.harvestDate && <p className="text-sm text-gray-700">📅 {new Date(h.harvestDate).toLocaleDateString('en-KE', { weekday:'long', day:'numeric', month:'long' })}</p>}
                       {h.farmLocation && <p className="text-sm text-gray-600">📍 {h.farmLocation}</p>}
-                      {h.estimatedWeightKg > 0 && <p className="text-sm text-gray-600">⚖️ Estimated: <strong>{h.estimatedWeightKg} kg</strong></p>}
+                      {h.estimatedWeightKg > 0 && <p className="text-sm text-gray-600">⚖️ {t('farmerHarvests.estimated')} <strong>{h.estimatedWeightKg} kg</strong></p>}
                       {h.actualWeightKg > 0 && (
-                        <p className="text-sm text-gray-600">✅ Actual: <strong>{h.actualWeightKg} kg</strong>
+                        <p className="text-sm text-gray-600">✅ {t('farmerHarvests.actual')} <strong>{h.actualWeightKg} kg</strong>
                           {h.weightVarianceKg != null && (
                             <span className={`ml-1 text-xs font-bold ${Number(h.weightVarianceKg) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                               ({Number(h.weightVarianceKg) >= 0 ? '+' : ''}{Number(h.weightVarianceKg).toFixed(1)} kg)
@@ -344,15 +392,15 @@ export default function FarmerDashboard() {
                       )}
                       {h.agentName && (
                         <div className="flex items-center gap-2">
-                          <p className="text-sm text-blue-600">🧑‍🌾 Agent: {h.agentName}</p>
+                          <p className="text-sm text-blue-600">{t('farmerHome.agentLabel', { name: h.agentName })}</p>
                           {h.assignedAgent?.phoneNumber && (
-                            <a href={`tel:${h.assignedAgent.phoneNumber}`} className="text-xs text-blue-500 underline">Call</a>
+                            <a href={`tel:${h.assignedAgent.phoneNumber}`} className="text-xs text-blue-500 underline">{t('common.call')}</a>
                           )}
                         </div>
                       )}
                       {(h.items || []).length > 0 && (
                         <div className="bg-green-50 rounded-xl p-3 mt-2">
-                          <p className="text-xs font-bold text-green-800 mb-1.5">Graded Miraa</p>
+                          <p className="text-xs font-bold text-green-800 mb-1.5">{t('farmerHarvests.gradedMiraa')}</p>
                           {h.items.map((item: any, i: number) => (
                             <div key={i} className="flex justify-between text-xs text-green-700 mb-0.5">
                               <span>{item.miraaGrade}: {item.weightKg} kg @ KES {Number(item.pricePerKg).toLocaleString()}/kg</span>
@@ -360,15 +408,21 @@ export default function FarmerDashboard() {
                             </div>
                           ))}
                           <div className="flex justify-between text-sm font-black text-green-800 border-t border-green-200 mt-2 pt-2">
-                            <span>Total Earned</span>
+                            <span>{t('farmerHarvests.totalEarned')}</span>
                             <span>KES {totalVal.toLocaleString()}</span>
                           </div>
+                        </div>
+                      )}
+                      {paymentSentence && (
+                        <div className="bg-green-600 rounded-xl p-3 mt-2 text-white">
+                          <p className="text-xs font-bold mb-1">{t('farmerHarvests.paymentBreakdownTitle')}</p>
+                          <p className="text-xs leading-relaxed">{paymentSentence}</p>
                         </div>
                       )}
                       {['scheduled','confirmed'].includes(h.status) && (
                         <button onClick={() => navigate(`/farmer/harvest/${h.id}/edit`)}
                           className="w-full mt-2 border-2 border-gray-200 text-gray-600 text-sm font-bold py-2 rounded-xl">
-                          ✏️ Edit This Harvest
+                          {t('farmerHarvests.editHarvest')}
                         </button>
                       )}
                     </div>
@@ -380,15 +434,15 @@ export default function FarmerDashboard() {
         ) : (
           /* ── ANALYTICS ── */
           <div className="px-4 space-y-4">
-            <p className="font-black text-gray-900 text-lg">📊 Your Harvest Analytics</p>
+            <p className="font-black text-gray-900 text-lg">{t('farmerHarvests.analyticsTitle')}</p>
 
             {/* Summary cards */}
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Total Harvests', value: String(harvests.length),      icon: '🌿', color: 'bg-green-50 border-green-100' },
-                { label: 'Paid Harvests',  value: String(paidHarvests.length),  icon: '💰', color: 'bg-emerald-50 border-emerald-100' },
-                { label: 'Total KG',       value: `${totalKg.toFixed(0)} kg`,   icon: '⚖️', color: 'bg-blue-50 border-blue-100' },
-                { label: 'Total Earnings', value: `KES ${totalEarnings >= 1000 ? (totalEarnings/1000).toFixed(1)+'K' : totalEarnings.toLocaleString()}`, icon: '📈', color: 'bg-purple-50 border-purple-100' },
+                { label: t('farmerHarvests.totalHarvests'), value: String(harvests.length),      icon: '🌿', color: 'bg-green-50 border-green-100' },
+                { label: t('farmerHarvests.paidHarvests'),  value: String(paidHarvests.length),  icon: '💰', color: 'bg-emerald-50 border-emerald-100' },
+                { label: t('farmerHarvests.totalKg'),       value: `${totalKg.toFixed(0)} kg`,   icon: '⚖️', color: 'bg-blue-50 border-blue-100' },
+                { label: t('farmerHarvests.totalEarnings'), value: `KES ${totalEarnings >= 1000 ? (totalEarnings/1000).toFixed(1)+'K' : totalEarnings.toLocaleString()}`, icon: '📈', color: 'bg-purple-50 border-purple-100' },
               ].map(card => (
                 <div key={card.label} className={`${card.color} border rounded-2xl p-4`}>
                   <span className="text-2xl">{card.icon}</span>
@@ -401,12 +455,12 @@ export default function FarmerDashboard() {
             {/* Grade breakdown */}
             {Object.keys(gradeBreakdown).length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-                <p className="font-black text-gray-900 mb-3">🌿 Miraa Grade Breakdown</p>
+                <p className="font-black text-gray-900 mb-3">{t('farmerHarvests.gradeBreakdown')}</p>
                 {bestGrade && (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-3">
-                    <p className="text-xs text-green-700 font-medium">🏆 Your most harvested grade</p>
+                    <p className="text-xs text-green-700 font-medium">{t('farmerHarvests.bestGradeLabel')}</p>
                     <p className="font-black text-green-800 text-lg">{bestGrade[0]}</p>
-                    <p className="text-xs text-green-600">{Number(bestGrade[1]).toFixed(1)} kg total</p>
+                    <p className="text-xs text-green-600">{Number(bestGrade[1]).toFixed(1)} {t('farmerHarvests.kgTotal')}</p>
                   </div>
                 )}
                 <div className="space-y-2">
@@ -422,7 +476,7 @@ export default function FarmerDashboard() {
             {paidHarvests.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="font-black text-gray-900">📋 Harvest History</p>
+                  <p className="font-black text-gray-900">{t('farmerHarvests.harvestHistory')}</p>
                 </div>
                 <div className="divide-y divide-gray-100">
                   {paidHarvests.map((h: any) => {
@@ -447,19 +501,19 @@ export default function FarmerDashboard() {
             {harvests.length === 0 && (
               <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
                 <p className="text-4xl mb-3">📊</p>
-                <p className="font-bold text-gray-700">No analytics yet</p>
-                <p className="text-gray-400 text-sm mt-1">Complete some harvests to see your analytics</p>
+                <p className="font-bold text-gray-700">{t('farmerHarvests.noAnalytics')}</p>
+                <p className="text-gray-400 text-sm mt-1">{t('farmerHarvests.noAnalyticsHint')}</p>
               </div>
             )}
 
             {/* Tips */}
             <div className="bg-gradient-to-br from-green-50 to-teal-50 border border-green-200 rounded-2xl p-4">
-              <p className="font-bold text-green-800 text-sm mb-2">💡 Harvest Tips</p>
+              <p className="font-bold text-green-800 text-sm mb-2">{t('farmerHarvests.tipsTitle')}</p>
               <div className="space-y-1.5 text-xs text-green-700">
-                <p>• Schedule harvests regularly to increase your loan score</p>
-                <p>• Grade 1 miraa fetches the highest price — proper care pays off</p>
-                <p>• Harvest in the early morning for maximum freshness and weight</p>
-                <p>• Work with your assigned agent for accurate grading</p>
+                <p>{t('farmerHarvests.tip1')}</p>
+                <p>{t('farmerHarvests.tip2')}</p>
+                <p>{t('farmerHarvests.tip3')}</p>
+                <p>{t('farmerHarvests.tip4')}</p>
               </div>
             </div>
           </div>
@@ -471,27 +525,27 @@ export default function FarmerDashboard() {
   // ── SAVINGS ─────────────────────────────────────────────────────────────────
   const SavingsTab = () => (
     <div className="px-4 pt-4 pb-24 space-y-4">
-      <p className="font-black text-gray-900 text-xl">💵 My Accounts</p>
+      <p className="font-black text-gray-900 text-xl">{t('farmerSavings.myAccounts')}</p>
 
       {savAccounts.filter((a: any) => a.accountType === 'savings').map((acc: any) => (
         <div key={acc.id} className="bg-gradient-to-br from-green-700 to-green-500 rounded-3xl p-5 text-white shadow-lg">
           <div className="flex justify-between items-start mb-1">
             <div>
-              <p className="text-green-100 text-xs font-medium tracking-wide">💵 SAVINGS ACCOUNT</p>
+              <p className="text-green-100 text-xs font-medium tracking-wide">{t('farmerSavings.savingsAccount')}</p>
               <p className="text-green-200 text-xs">{acc.accountNumber}</p>
             </div>
-            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-bold">Active ✓</span>
+            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-bold">{t('farmerSavings.active')}</span>
           </div>
           <p className="text-5xl font-black mt-3">KES {Number(acc.balance).toLocaleString()}</p>
-          <p className="text-green-200 text-xs mt-1">Withdrawable balance</p>
+          <p className="text-green-200 text-xs mt-1">{t('farmerSavings.withdrawableBalance')}</p>
           <div className="grid grid-cols-2 gap-2 mt-4">
             <button onClick={() => navigate('/farmer/mpesa?type=deposit')}
               className="bg-white/20 hover:bg-white/30 text-white text-sm font-bold py-3 rounded-2xl transition-colors active:scale-95">
-              📥 Deposit
+              📥 {t('common.deposit')}
             </button>
             <button onClick={() => navigate('/farmer/mpesa?type=withdraw')}
               className="bg-white/20 hover:bg-white/30 text-white text-sm font-bold py-3 rounded-2xl transition-colors active:scale-95">
-              💸 Withdraw
+              💸 {t('common.withdraw')}
             </button>
           </div>
         </div>
@@ -501,16 +555,16 @@ export default function FarmerDashboard() {
         <div key={acc.id} className="bg-gradient-to-br from-indigo-700 to-indigo-500 rounded-3xl p-5 text-white shadow-lg">
           <div className="flex justify-between items-start mb-1">
             <div>
-              <p className="text-indigo-100 text-xs font-medium tracking-wide">📊 SHARE CAPITAL</p>
+              <p className="text-indigo-100 text-xs font-medium tracking-wide">{t('farmerSavings.shareCapitalTag')}</p>
               <p className="text-indigo-200 text-xs">{acc.accountNumber}</p>
             </div>
-            <span className="bg-red-500/70 text-white text-xs px-2 py-0.5 rounded-full font-bold">Non-withdrawable</span>
+            <span className="bg-red-500/70 text-white text-xs px-2 py-0.5 rounded-full font-bold">{t('farmerSavings.nonWithdrawable')}</span>
           </div>
           <p className="text-5xl font-black mt-3">KES {Number(acc.balance).toLocaleString()}</p>
-          <p className="text-indigo-200 text-xs mt-1">Ownership shares in Igembe SACCO</p>
+          <p className="text-indigo-200 text-xs mt-1">{t('farmerSavings.shareCapitalDesc')}</p>
           <div className="bg-white/10 rounded-2xl p-3 mt-4">
             <p className="text-xs text-indigo-100 leading-relaxed">
-              Share capital is your ownership stake in the SACCO. It earns annual dividends and grows as you contribute more.
+              {t('farmerSavings.shareCapitalLong')}
             </p>
           </div>
         </div>
@@ -518,20 +572,20 @@ export default function FarmerDashboard() {
 
       {Number(mem?.harvestAccountBalance) > 0 && (
         <div className="bg-gradient-to-br from-teal-700 to-teal-500 rounded-3xl p-5 text-white shadow-lg">
-          <p className="text-teal-100 text-xs font-medium tracking-wide">🌿 HARVEST EARNINGS</p>
+          <p className="text-teal-100 text-xs font-medium tracking-wide">{t('farmerSavings.harvestEarningsTag')}</p>
           <p className="text-teal-200 text-xs">{mem?.harvestAccountNumber}</p>
           <p className="text-4xl font-black mt-2">KES {Number(mem?.harvestAccountBalance).toLocaleString()}</p>
-          <p className="text-teal-200 text-xs mt-1">Earnings from miraa sales</p>
+          <p className="text-teal-200 text-xs mt-1">{t('farmerSavings.harvestEarningsDesc')}</p>
         </div>
       )}
 
       <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
-        <p className="font-bold text-gray-700 text-sm mb-3">📲 Deposit via M-Pesa Paybill</p>
+        <p className="font-bold text-gray-700 text-sm mb-3">{t('farmerSavings.paybillTitle')}</p>
         <div className="space-y-1 text-xs text-gray-600">
-          <p>1. Open M-Pesa → Lipa na M-Pesa → Paybill</p>
-          <p>2. Business Number: <span className="font-black text-gray-900">174379</span></p>
-          <p>3. Account Number: <span className="font-black text-gray-900">{mem?.memberNumber}</span></p>
-          <p>4. Enter amount and confirm with your M-Pesa PIN</p>
+          <p>{t('farmerSavings.paybillStep1')}</p>
+          <p>{t('farmerSavings.paybillStep2', { number: '174379' })}</p>
+          <p>{t('farmerSavings.paybillStep3', { number: mem?.memberNumber || '' })}</p>
+          <p>{t('farmerSavings.paybillStep4')}</p>
         </div>
       </div>
     </div>
@@ -540,20 +594,26 @@ export default function FarmerDashboard() {
   // ── LOANS ────────────────────────────────────────────────────────────────────
   const LoansTab = () => (
     <div className="px-4 pt-4 pb-24 space-y-4">
-      <div className="flex justify-between items-center">
-        <p className="font-black text-gray-900 text-xl">💰 My Loans</p>
-        {eligibility.eligible && (
-          <button onClick={() => navigate('/farmer/loan/apply')}
-            className="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">
-            Apply →
+      <div className="flex justify-between items-center gap-2">
+        <p className="font-black text-gray-900 text-xl">{t('farmerLoans.myLoans')}</p>
+        <div className="flex gap-2">
+          <button onClick={() => navigate('/farmer/loan/calculator')}
+            className="bg-white border border-gray-200 text-gray-700 text-xs font-bold px-3 py-2 rounded-xl">
+            {t('farmerLoans.calculator')}
           </button>
-        )}
+          {eligibility.eligible && (
+            <button onClick={() => navigate('/farmer/loan/apply')}
+              className="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">
+              {t('farmerLoans.apply')}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Score card */}
       <div className={`rounded-2xl p-4 border ${eligibility.hasActiveLoan ? 'bg-orange-50 border-orange-200' : eligibility.loanScore > 60 ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
         <div className="flex justify-between items-center mb-2">
-          <p className="text-sm font-bold text-gray-700">Your Loan Score</p>
+          <p className="text-sm font-bold text-gray-700">{t('farmerLoans.yourScore')}</p>
           <span className="font-black text-lg text-green-700">{eligibility.loanScore || 0}<span className="text-sm text-gray-400">/100</span></span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
@@ -561,19 +621,19 @@ export default function FarmerDashboard() {
             style={{ width: `${Math.min(100, eligibility.loanScore || 0)}%` }} />
         </div>
         <div className="flex justify-between text-xs text-gray-500">
-          <span>Max eligible: <span className="font-bold text-green-600">KES {(eligibility.maxAmount || 50000).toLocaleString()}</span></span>
-          {eligibility.hasActiveLoan && <span className="text-orange-600 font-medium">⚠️ Has active loan</span>}
+          <span>{t('farmerLoans.maxEligible', { amount: `KES ${(eligibility.maxAmount || 50000).toLocaleString()}` })}</span>
+          {eligibility.hasActiveLoan && <span className="text-orange-600 font-medium">{t('farmerLoans.hasActiveLoan')}</span>}
         </div>
       </div>
 
       {allLoans.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
           <p className="text-4xl mb-3">💰</p>
-          <p className="font-bold text-gray-900">No loans yet</p>
-          <p className="text-gray-400 text-sm mt-1">Apply for a loan to get started</p>
+          <p className="font-bold text-gray-900">{t('farmerLoans.noLoans')}</p>
+          <p className="text-gray-400 text-sm mt-1">{t('farmerLoans.applyToStart')}</p>
           <button onClick={() => navigate('/farmer/loan/apply')}
             className="mt-4 bg-green-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">
-            Apply for Loan →
+            {t('farmerLoans.applyForLoan')}
           </button>
         </div>
       ) : (
@@ -600,15 +660,15 @@ export default function FarmerDashboard() {
                   loan.status === 'completed' ? 'bg-gray-50 text-gray-600' :
                   loan.status === 'rejected'  ? 'bg-red-50 text-red-700'   : 'bg-yellow-50 text-yellow-700'
                 }`}>
-                  {LOAN_MSG[loan.status] || `Status: ${loan.status}`}
+                  {t(`loanStatus.${loan.status}`)}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { label: 'Principal',   value: `KES ${Number(loan.principalAmount).toLocaleString()}` },
-                    { label: 'Balance',     value: `KES ${bal.toLocaleString()}` },
-                    { label: 'Monthly',     value: `KES ${Number(loan.monthlyInstallment).toLocaleString()}` },
-                    { label: 'Total Paid',  value: `KES ${paid.toLocaleString()}` },
+                    { label: t('farmerLoans.principal'),  value: `KES ${Number(loan.principalAmount).toLocaleString()}` },
+                    { label: t('farmerLoans.balance'),    value: `KES ${bal.toLocaleString()}` },
+                    { label: t('farmerLoans.monthly'),    value: `KES ${Number(loan.monthlyInstallment).toLocaleString()}` },
+                    { label: t('farmerLoans.totalPaid'),  value: `KES ${paid.toLocaleString()}` },
                   ].map(r => (
                     <div key={r.label} className="bg-gray-50 rounded-xl p-3">
                       <p className="text-xs text-gray-400">{r.label}</p>
@@ -620,7 +680,7 @@ export default function FarmerDashboard() {
                 {pct > 0 && (
                   <div className="mb-3">
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-gray-500">Repayment Progress</span>
+                      <span className="text-gray-500">{t('farmerLoans.repaymentProgress')}</span>
                       <span className="font-bold text-green-600">{pct}%</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2.5">
@@ -631,23 +691,23 @@ export default function FarmerDashboard() {
 
                 {loan.dueDate && (
                   <p className="text-xs text-orange-600 font-medium mb-3">
-                    📅 Due: {new Date(loan.dueDate).toLocaleDateString('en-KE')}
+                    {t('farmerLoans.due', { date: new Date(loan.dueDate).toLocaleDateString('en-KE') })}
                   </p>
                 )}
 
                 {['disbursed','repaying'].includes(loan.status) && (
                   <button onClick={() => navigate(`/farmer/mpesa?type=repay&loanId=${loan.id}&loanNumber=${loan.loanNumber}`)}
                     className="w-full bg-green-600 text-white text-sm font-bold py-3 rounded-xl">
-                    📱 Repay via M-Pesa
+                    {t('farmerLoans.repayMpesa')}
                   </button>
                 )}
 
                 {loan.status === 'completed' && (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-                    <p className="text-green-700 font-bold text-sm">🎉 Fully repaid! Apply for a new loan.</p>
+                    <p className="text-green-700 font-bold text-sm">{t('farmerLoans.fullyRepaid')}</p>
                     <button onClick={() => navigate('/farmer/loan/apply')}
                       className="mt-2 bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl">
-                      Apply for New Loan
+                      {t('farmerLoans.applyNewLoan')}
                     </button>
                   </div>
                 )}
@@ -672,7 +732,7 @@ export default function FarmerDashboard() {
             <h2 className="text-2xl font-black">{mem?.fullName}</h2>
             <p className="text-green-200 text-sm">{mem?.memberNumber}</p>
             <span className={`inline-block mt-1 px-3 py-0.5 rounded-full text-xs font-bold ${mem?.status === 'active' ? 'bg-green-500' : 'bg-red-500'} text-white`}>
-              {mem?.status === 'active' ? '✓ Active Member' : mem?.status}
+              {mem?.status === 'active' ? t('farmerProfile.activeMember') : mem?.status}
             </span>
           </div>
         </div>
@@ -680,17 +740,17 @@ export default function FarmerDashboard() {
 
       {/* Details */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <p className="font-black text-gray-900 mb-3">Account Details</p>
+        <p className="font-black text-gray-900 mb-3">{t('farmerProfile.accountDetails')}</p>
         {[
-          { icon: '📱', label: 'Phone',         value: mem?.phoneNumber },
-          { icon: '📍', label: 'Village',       value: mem?.village },
-          { icon: '🏛️', label: 'Ward',          value: mem?.ward },
-          { icon: '🔢', label: 'Member No.',    value: mem?.memberNumber },
-          { icon: '📊', label: 'Loan Score',    value: `${mem?.loanScore || 0}/100` },
-          { icon: '🌿', label: 'Total Harvests', value: String(harvests.length) },
+          { label: t('farmerProfile.phone'),         value: mem?.phoneNumber },
+          { label: t('farmerProfile.village'),       value: mem?.village },
+          { label: t('farmerProfile.ward'),          value: mem?.ward },
+          { label: t('farmerProfile.memberNo'),      value: mem?.memberNumber },
+          { label: t('farmerProfile.loanScore'),     value: `${mem?.loanScore || 0}/100` },
+          { label: t('farmerProfile.totalHarvests'), value: String(harvests.length) },
         ].map(r => (
           <div key={r.label} className="flex justify-between items-center py-2.5 border-b border-gray-50 last:border-0">
-            <span className="text-gray-500 text-sm">{r.icon} {r.label}</span>
+            <span className="text-gray-500 text-sm">{r.label}</span>
             <span className="font-bold text-gray-900 text-sm">{r.value || '—'}</span>
           </div>
         ))}
@@ -698,23 +758,27 @@ export default function FarmerDashboard() {
 
       {/* Settings */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <p className="font-black text-gray-900 mb-3">Settings</p>
+        <p className="font-black text-gray-900 mb-3">{t('farmerProfile.settings')}</p>
+        <div className="flex items-center justify-between py-3 border-b border-gray-50">
+          <span className="text-gray-700 text-sm">🌐 {t('common.changeLanguage')}</span>
+          <LanguageSwitcher />
+        </div>
         <button onClick={() => navigate('/forgot-pin')}
           className="w-full text-left flex items-center justify-between py-3 border-b border-gray-50 active:bg-gray-50 rounded-xl px-2">
-          <span className="text-gray-700 text-sm">🔒 Change PIN</span>
+          <span className="text-gray-700 text-sm">{t('farmerProfile.changePin')}</span>
           <span className="text-gray-400 text-lg">›</span>
         </button>
         <button onClick={() => { logout(); navigate('/login', { replace: true }) }}
           className="w-full bg-red-50 border border-red-200 text-red-600 font-bold py-3 rounded-2xl text-sm mt-3">
-          🚪 Sign Out
+          🚪 {t('common.signOut')}
         </button>
       </div>
 
       {/* Help */}
       <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
-        <p className="text-green-700 text-sm font-medium">Need help? Contact us</p>
+        <p className="text-green-700 text-sm font-medium">{t('common.needHelp')}</p>
         <a href="tel:0757630995" className="block font-black text-green-700 text-xl mt-1">📞 0757 630 995</a>
-        <p className="text-green-500 text-xs mt-1">Mon–Fri · 8:00am – 5:00pm</p>
+        <p className="text-green-500 text-xs mt-1">{t('common.officeHours')}</p>
       </div>
     </div>
   )
@@ -734,11 +798,11 @@ export default function FarmerDashboard() {
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 shadow-xl">
         <div className="flex justify-around items-center px-2 py-2 max-w-lg mx-auto">
           {([
-            { id: 'home',     emoji: '🏠', label: 'Home'     },
-            { id: 'harvests', emoji: '🌿', label: 'Harvests' },
-            { id: 'savings',  emoji: '💵', label: 'Savings'  },
-            { id: 'loans',    emoji: '💰', label: 'Loans'    },
-            { id: 'profile',  emoji: '👤', label: 'Profile'  },
+            { id: 'home',     emoji: '🏠', label: t('nav.home')     },
+            { id: 'harvests', emoji: '🌿', label: t('nav.harvests') },
+            { id: 'savings',  emoji: '💵', label: t('nav.savings')  },
+            { id: 'loans',    emoji: '💰', label: t('nav.loans')    },
+            { id: 'profile',  emoji: '👤', label: t('nav.profile') },
           ] as { id: Tab; emoji: string; label: string }[]).map(item => (
             <button key={item.id} onClick={() => setTab(item.id)}
               className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-all min-w-[56px] ${tab === item.id ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}>
