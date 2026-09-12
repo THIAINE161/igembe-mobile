@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
+import { INTEREST_RATE, TERM_OPTIONS, computeLoanFigures } from '../lib/loanConfig'
 import api from '../lib/api'
 
 interface Eligibility {
@@ -122,7 +123,6 @@ function ImageUploadField({
   )
 }
 
-const INTEREST_RATE = 12 // 12% per annum
 const PURPOSES = [
   'Farm inputs (fertilizer, pesticides)',
   'Expand miraa farm',
@@ -133,12 +133,12 @@ const PURPOSES = [
   'Home improvement',
   'Other'
 ]
-const TERM_OPTIONS = [3, 6, 12, 18, 24, 36]
 const RELATIONSHIPS = ['Spouse', 'Parent', 'Sibling', 'Friend', 'Colleague', 'Neighbour', 'Other']
 
 export default function LoanApplicationPage() {
   const navigate = useNavigate()
   const { member } = useMobileStore()
+  const [searchParams] = useSearchParams()
 
   const [step, setStep] = useState(1)
   const [eligibilityLoading, setEligibilityLoading] = useState(true)
@@ -147,9 +147,13 @@ export default function LoanApplicationPage() {
   const [error, setError] = useState('')
   const [submittedLoan, setSubmittedLoan] = useState<any>(null)
 
-  // Step 1: Loan details
-  const [principalAmount, setPrincipalAmount] = useState('')
-  const [termMonths, setTermMonths] = useState(12)
+  // Step 1: Loan details — prefilled from the Loan Calculator's "Apply Now"
+  // link (?amount=&term=) when the farmer arrives that way, so they don't
+  // have to re-enter what they already worked out there.
+  const prefillAmount = Number(searchParams.get('amount')) || 0
+  const prefillTerm = Number(searchParams.get('term')) || 0
+  const [principalAmount, setPrincipalAmount] = useState(prefillAmount > 0 ? String(prefillAmount) : '')
+  const [termMonths, setTermMonths] = useState(TERM_OPTIONS.includes(prefillTerm) ? prefillTerm : 12)
   const [purpose, setPurpose] = useState('')
   const [customPurpose, setCustomPurpose] = useState('')
 
@@ -193,12 +197,7 @@ export default function LoanApplicationPage() {
   // Loan calculation
   const P = Number(principalAmount) || 0
   const n = termMonths
-  const r = INTEREST_RATE / 100 / 12
-  const monthly = P > 0
-    ? (r === 0 ? P / n : (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1))
-    : 0
-  const totalPayable = monthly * n
-  const totalInterest = totalPayable - P
+  const { monthly, totalPayable, totalInterest } = computeLoanFigures(P, n)
 
   const validateStep1 = () => {
     if (!P || P <= 0) { setError('Enter a valid loan amount'); return false }
