@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { useMobileStore } from '../store/mobileStore'
+import LanguageSwitcher from '../components/LanguageSwitcher'
+import NotificationBell from '../components/NotificationBell'
+import { useT } from '../lib/useT'
 import api from '../lib/api'
 
 type AgentTab = 'active' | 'completed' | 'prices' | 'profile'
@@ -13,10 +18,10 @@ const STATUS_COLORS: Record<string, string> = {
   graded:             'bg-teal-100 text-teal-800',
   paid:               'bg-green-100 text-green-800',
 }
-const STATUS_NEXT: Record<string, string> = {
-  confirmed:  '🌿 Start Harvesting',
-  harvesting: '⚖️ Record Quantity',
-  picked_up:  '🌿 Grade Miraa',
+const STATUS_NEXT_KEY: Record<string, string> = {
+  confirmed:  'agentActive.startHarvesting',
+  harvesting: 'agentActive.recordQuantity',
+  picked_up:  'agentActive.gradeMiraa',
 }
 
 function Spinner({ size = 5, cls = 'text-blue-600' }: { size?: number; cls?: string }) {
@@ -29,10 +34,23 @@ function Spinner({ size = 5, cls = 'text-blue-600' }: { size?: number; cls?: str
 }
 
 // ── Embedded map component (Uber/Bolt style) ────────────────────────────────
+// Tracks the agent's GPS live via watchPosition (not a single snapshot) and
+// moves the existing marker/route/distance badge in place, so it behaves
+// like a real live-tracking map instead of a one-time "here's where you were".
 function EmbeddedMap({ harvest }: { harvest: any }) {
-  const mapRef     = useRef<HTMLDivElement>(null)
-  const mapInst    = useRef<any>(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'no-location'>('loading')
+  const t = useT()
+  const mapRef         = useRef<HTMLDivElement>(null)
+  const mapInst        = useRef<any>(null)
+  const farmMarkerRef  = useRef<any>(null)
+  const agentMarkerRef = useRef<any>(null)
+  const routeLineRef   = useRef<any>(null)
+  const distMarkerRef  = useRef<any>(null)
+  const watchIdRef     = useRef<number | null>(null)
+  const firstFixRef    = useRef(true)
+
+  const [status, setStatus] = useState<'loading' | 'ready' | 'no-location' | 'error'>('loading')
+  const [distanceKm, setDistanceKm] = useState<number | null>(null)
+  const [liveTracking, setLiveTracking] = useState(false)
 
   const farmLat  = Number(harvest.farmLatitude  || harvest.member?.latitude  || 0)
   const farmLng  = Number(harvest.farmLongitude || harvest.member?.longitude || 0)
@@ -41,118 +59,164 @@ function EmbeddedMap({ harvest }: { harvest: any }) {
   useEffect(() => {
     if (!mapRef.current) return
     let mounted = true
+    firstFixRef.current = true
+
+    // Called on every GPS fix — moves markers in place instead of recreating
+    // them, so the agent's dot glides across the map like Uber/Bolt.
+    const onPosition = (lat: number, lng: number) => {
+      if (!mounted || !mapInst.current) return
+      const map = mapInst.current
+
+      if (!agentMarkerRef.current) {
+        const agentIcon = L.divIcon({
+          html: `<div style="position:relative;width:34px;height:34px;">
+                   <div class="animate-ping" style="position:absolute;inset:2px;background:#2563eb;opacity:0.4;border-radius:50%;"></div>
+                   <div style="position:absolute;inset:5px;background:#2563eb;border-radius:50%;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,0.4);"></div>
+                 </div>`,
+          className: '',
+          iconSize: [34, 34],
+          iconAnchor: [17, 17]
+        })
+        agentMarkerRef.current = L.marker([lat, lng], { icon: agentIcon, zIndexOffset: 1000 })
+          .addTo(map)
+          .bindPopup('<b>📍 You (live)</b>')
+      } else {
+        agentMarkerRef.current.setLatLng([lat, lng])
+      }
+
+      if (hasFarmCoords) {
+        if (!routeLineRef.current) {
+          routeLineRef.current = L.polyline([[lat, lng], [farmLat, farmLng]], {
+            color: '#16a34a', weight: 3, dashArray: '8 5', opacity: 0.8
+          }).addTo(map)
+        } else {
+          routeLineRef.current.setLatLngs([[lat, lng], [farmLat, farmLng]])
+        }
+
+        // Haversine distance
+        const R = 6371
+        const dLat = (farmLat - lat) * Math.PI / 180
+        const dLng = (farmLng - lng) * Math.PI / 180
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat*Math.PI/180)*Math.cos(farmLat*Math.PI/180)*Math.sin(dLng/2)**2
+        const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+        setDistanceKm(km)
+
+        const mid = [(lat+farmLat)/2, (lng+farmLng)/2] as [number, number]
+        const distIcon = L.divIcon({
+          html: `<div style="background:white;border:2px solid #16a34a;color:#166534;font-weight:900;font-size:12px;padding:3px 8px;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.2);white-space:nowrap;">~${km.toFixed(1)} km away</div>`,
+          className: '',
+          iconAnchor: [40, 10]
+        })
+        if (!distMarkerRef.current) {
+          distMarkerRef.current = L.marker(mid, { icon: distIcon, interactive: false }).addTo(map)
+        } else {
+          distMarkerRef.current.setLatLng(mid)
+          distMarkerRef.current.setIcon(distIcon)
+        }
+      }
+
+      // Fit both points into view only on the very first fix — after that,
+      // keep tracking live without yanking the map away from the user.
+      if (firstFixRef.current) {
+        firstFixRef.current = false
+        if (hasFarmCoords) map.fitBounds([[lat, lng], [farmLat, farmLng]], { padding: [50, 50], maxZoom: 16 })
+        else map.setView([lat, lng], 15)
+      }
+
+      setLiveTracking(true)
+      if (mounted) setStatus('ready')
+    }
 
     const init = () => {
       if (!mounted || !mapRef.current) return
-      const L = (window as any).L
-      if (!L) { setTimeout(init, 500); return }
 
-      // Remove old map
-      if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
+      try {
+        // Remove old map
+        if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
+        farmMarkerRef.current = null
+        agentMarkerRef.current = null
+        routeLineRef.current = null
+        distMarkerRef.current = null
 
-      const defaultLat = hasFarmCoords ? farmLat : -0.3
-      const defaultLng = hasFarmCoords ? farmLng : 37.65
+        const defaultLat = hasFarmCoords ? farmLat : -0.3
+        const defaultLng = hasFarmCoords ? farmLng : 37.65
 
-      const map = L.map(mapRef.current, {
-        zoomControl: true,
-        attributionControl: true,
-        dragging: true,
-        touchZoom: true,
-        doubleClickZoom: true,
-        scrollWheelZoom: false
-      }).setView([defaultLat, defaultLng], hasFarmCoords ? 15 : 12)
+        const map = L.map(mapRef.current, {
+          zoomControl: true,
+          attributionControl: true,
+          dragging: true,
+          touchZoom: true,
+          doubleClickZoom: true,
+          scrollWheelZoom: false
+        }).setView([defaultLat, defaultLng], hasFarmCoords ? 15 : 12)
 
-      mapInst.current = map
+        mapInst.current = map
 
-      // Map tiles
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19
-      }).addTo(map)
+        // Map tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+          maxZoom: 19
+        }).addTo(map)
 
-      if (hasFarmCoords) {
-        // Farm marker (green pin)
-        const farmIcon = L.divIcon({
-          html: `<div style="background:#16a34a;color:white;border-radius:50% 50% 50% 0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 3px 12px rgba(0,0,0,0.3);transform:rotate(-45deg);border:3px solid white;">
-                   <span style="transform:rotate(45deg)">🌿</span>
-                 </div>`,
-          className: '',
-          iconSize: [36, 36],
-          iconAnchor: [18, 36]
-        })
-        const farmMarker = L.marker([farmLat, farmLng], { icon: farmIcon }).addTo(map)
-        farmMarker.bindPopup(`
-          <div style="font-family:sans-serif;min-width:160px;">
-            <p style="font-weight:900;margin:0 0 4px 0;color:#166534">${harvest.member?.fullName || 'Farm'}</p>
-            <p style="font-size:11px;color:#4b5563;margin:0">${harvest.farmLocation || harvest.member?.village || 'Farm location'}</p>
-            ${harvest.estimatedWeightKg > 0 ? `<p style="font-size:11px;color:#4b5563;margin:4px 0 0 0">Est: ${harvest.estimatedWeightKg} kg</p>` : ''}
-          </div>
-        `, { maxWidth: 200 })
+        if (hasFarmCoords) {
+          // Farm marker (green pin)
+          const farmIcon = L.divIcon({
+            html: `<div style="background:#16a34a;color:white;border-radius:50% 50% 50% 0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 3px 12px rgba(0,0,0,0.3);transform:rotate(-45deg);border:3px solid white;">
+                     <span style="transform:rotate(45deg)">🌿</span>
+                   </div>`,
+            className: '',
+            iconSize: [36, 36],
+            iconAnchor: [18, 36]
+          })
+          const farmMarker = L.marker([farmLat, farmLng], { icon: farmIcon }).addTo(map)
+          farmMarker.bindPopup(`
+            <div style="font-family:sans-serif;min-width:160px;">
+              <p style="font-weight:900;margin:0 0 4px 0;color:#166534">${harvest.member?.fullName || 'Farm'}</p>
+              <p style="font-size:11px;color:#4b5563;margin:0">${harvest.farmLocation || harvest.member?.village || 'Farm location'}</p>
+              ${harvest.estimatedWeightKg > 0 ? `<p style="font-size:11px;color:#4b5563;margin:4px 0 0 0">Est: ${harvest.estimatedWeightKg} kg</p>` : ''}
+            </div>
+          `, { maxWidth: 200 })
+          farmMarkerRef.current = farmMarker
 
-        // Try to get agent's GPS location
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            pos => {
-              if (!mounted || !mapInst.current) return
-              const agLat = pos.coords.latitude
-              const agLng = pos.coords.longitude
-
-              // Agent marker (blue)
-              const agentIcon = L.divIcon({
-                html: `<div style="background:#2563eb;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 3px 12px rgba(0,0,0,0.4);border:3px solid white;">📍</div>`,
-                className: '',
-                iconSize: [32, 32],
-                iconAnchor: [16, 16]
-              })
-              L.marker([agLat, agLng], { icon: agentIcon }).addTo(map)
-                .bindPopup('<b>📍 Your Location</b>')
-
-              // Dashed route line
-              L.polyline([[agLat, agLng], [farmLat, farmLng]], {
-                color: '#16a34a', weight: 3, dashArray: '8 5', opacity: 0.8
-              }).addTo(map)
-
-              // Distance
-              const R = 6371
-              const dLat = (farmLat - agLat) * Math.PI / 180
-              const dLng = (farmLng - agLng) * Math.PI / 180
-              const a = Math.sin(dLat/2)**2 + Math.cos(agLat*Math.PI/180)*Math.cos(farmLat*Math.PI/180)*Math.sin(dLng/2)**2
-              const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-
-              // Distance badge
-              const mid = [(agLat+farmLat)/2, (agLng+farmLng)/2] as [number,number]
-              const distIcon = L.divIcon({
-                html: `<div style="background:white;border:2px solid #16a34a;color:#166534;font-weight:900;font-size:12px;padding:3px 8px;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.2);white-space:nowrap;">~${km.toFixed(1)} km away</div>`,
-                className: '',
-                iconAnchor: [40, 10]
-              })
-              L.marker(mid, { icon: distIcon, interactive: false }).addTo(map)
-
-              // Fit view
-              map.fitBounds([[agLat, agLng], [farmLat, farmLng]], { padding: [50, 50], maxZoom: 16 })
-              if (mounted) setStatus('ready')
-            },
-            () => {
-              // No GPS — just show farm
-              if (mounted) setStatus('ready')
-              map.setView([farmLat, farmLng], 15)
-              farmMarker.openPopup()
-            },
-            { timeout: 8000, maximumAge: 30000 }
-          )
+          if (navigator.geolocation) {
+            // Live tracking — fires repeatedly as the agent moves, Uber-style.
+            watchIdRef.current = navigator.geolocation.watchPosition(
+              pos => onPosition(pos.coords.latitude, pos.coords.longitude),
+              () => {
+                // No GPS fix yet/denied — just show the farm, don't block the map.
+                // Guard on the marker ref (not React state) since this closure
+                // is created once and state reads inside it would go stale.
+                if (mounted && !agentMarkerRef.current) {
+                  setStatus('ready')
+                  map.setView([farmLat, farmLng], 15)
+                  farmMarker.openPopup()
+                }
+              },
+              { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
+            )
+          } else {
+            setStatus('ready')
+            farmMarker.openPopup()
+          }
         } else {
-          setStatus('ready')
-          farmMarker.openPopup()
+          setStatus('no-location')
         }
-      } else {
-        setStatus('no-location')
+      } catch (err) {
+        console.error('Map init error:', err)
+        if (mounted) setStatus('error')
       }
     }
+
+    // Hard timeout — if the map hasn't rendered within 10s (e.g. tile/network
+    // issues), stop showing an infinite spinner and fall back to a message.
+    const giveUp = setTimeout(() => { if (mounted) setStatus(s => s === 'loading' ? 'error' : s) }, 10000)
 
     setTimeout(init, 100)
 
     return () => {
       mounted = false
+      clearTimeout(giveUp)
+      if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
       if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
     }
   }, [harvest.id])
@@ -160,8 +224,16 @@ function EmbeddedMap({ harvest }: { harvest: any }) {
   if (status === 'no-location') return (
     <div className="bg-gray-100 rounded-2xl h-52 flex flex-col items-center justify-center gap-2">
       <span className="text-4xl">📍</span>
-      <p className="text-gray-500 text-sm font-medium">Location not available</p>
-      <p className="text-gray-400 text-xs text-center">Farmer has not set coordinates.<br/>Contact them directly.</p>
+      <p className="text-gray-500 text-sm font-medium">{t('map.noLocation')}</p>
+      <p className="text-gray-400 text-xs text-center whitespace-pre-line">{t('map.noLocationHint')}</p>
+    </div>
+  )
+
+  if (status === 'error') return (
+    <div className="bg-gray-100 rounded-2xl h-52 flex flex-col items-center justify-center gap-2">
+      <span className="text-4xl">🗺️</span>
+      <p className="text-gray-500 text-sm font-medium">{t('map.error')}</p>
+      <p className="text-gray-400 text-xs text-center whitespace-pre-line">{t('map.errorHint')}</p>
     </div>
   )
 
@@ -172,8 +244,14 @@ function EmbeddedMap({ harvest }: { harvest: any }) {
         <div className="absolute inset-0 bg-gray-100 rounded-2xl flex items-center justify-center z-10">
           <div className="flex flex-col items-center gap-2">
             <Spinner size={6} />
-            <p className="text-gray-500 text-xs">Loading map...</p>
+            <p className="text-gray-500 text-xs">{t('map.loading')}</p>
           </div>
+        </div>
+      )}
+      {liveTracking && (
+        <div className="absolute top-2 left-2 bg-white/95 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-sm z-10">
+          <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+          <span className="text-xs font-bold text-gray-700">{t('map.live')}{distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ''}</span>
         </div>
       )}
     </div>
@@ -184,6 +262,7 @@ export default function AgentDashboard() {
   const navigate  = useNavigate()
   const { agent, driver, roles, logout, setActiveRole } = useMobileStore()
   const agentData = agent || driver
+  const t = useT()
 
   const [dashData, setDashData]   = useState<any>(null)
   const [loading,  setLoading]    = useState(true)
@@ -213,8 +292,8 @@ export default function AgentDashboard() {
   useEffect(() => {
     if (!agentData?.id) { navigate('/login', { replace:true }); return }
     load()
-    const t = setInterval(() => load(false), 60_000)
-    return () => clearInterval(t)
+    const interval = setInterval(() => load(false), 60_000)
+    return () => clearInterval(interval)
   }, [agentData?.id])
 
   const load = useCallback(async (spinner = true) => {
@@ -224,7 +303,7 @@ export default function AgentDashboard() {
       const r = await api.get(`/api/mobile/agent/${agentData.id}/dashboard`)
       setDashData(r.data?.data)
     } catch (e: any) {
-      if (spinner) setError(e.response?.data?.error || 'Failed to load')
+      if (spinner) setError(e.response?.data?.error || t('agentMsg.failedToLoad'))
     } finally {
       spinner ? setLoading(false) : setRefreshing(false)
     }
@@ -237,28 +316,28 @@ export default function AgentDashboard() {
     setActionError('')
     try {
       await api.patch(`/api/harvests/${harvestId}/${endpoint}`, body)
-      showSuccess('Done! ✅')
+      showSuccess(t('agentMsg.done'))
       await load(false)
       if (selectedH) {
         const r = await api.get(`/api/harvests/${harvestId}`)
         setSelectedH(r.data?.data)
       }
     } catch (e: any) {
-      setActionError(e.response?.data?.error || 'Action failed. Try again.')
+      setActionError(e.response?.data?.error || t('agentMsg.actionFailed'))
     } finally {
       setActionLoading(false)
     }
   }
 
   const handleRecordQty = async () => {
-    if (!actualKg || Number(actualKg) <= 0) { setActionError('Enter a valid weight'); return }
+    if (!actualKg || Number(actualKg) <= 0) { setActionError(t('agentMsg.enterValidWeight')); return }
     await doAction(selectedH.id, 'record-quantity', { actualWeightKg: Number(actualKg), agentNotes: notes || undefined })
     setShowQty(false); setActualKg(''); setNotes('')
   }
 
   const handleGrade = async () => {
     const valid = gradeItems.filter(g => g.weightKg && g.pricePerKg && Number(g.weightKg)>0 && Number(g.pricePerKg)>0)
-    if (!valid.length) { setActionError('Enter weight and price for at least one grade'); return }
+    if (!valid.length) { setActionError(t('agentMsg.enterWeightAndPrice')); return }
     setGradeLoading(true)
     setActionError('')
     try {
@@ -266,13 +345,13 @@ export default function AgentDashboard() {
         items: valid.map(g => ({ miraaGrade:g.miraaGrade, weightKg:Number(g.weightKg), pricePerKg:Number(g.pricePerKg) })),
         gradedBy: agentData?.fullName || 'Agent'
       })
-      showSuccess('Miraa graded! Payment will be processed by SACCO. ✅')
+      showSuccess(t('agentMsg.gradedSuccess'))
       setShowGrade(false)
       setGradeItems([{ miraaGrade:'Grade 1', weightKg:'', pricePerKg:'' },{ miraaGrade:'Grade 2', weightKg:'', pricePerKg:'' },{ miraaGrade:'Gomba', weightKg:'', pricePerKg:'' }])
       await load(false)
       setSelectedH(null)
     } catch (e: any) {
-      setActionError(e.response?.data?.error || 'Failed. Try again.')
+      setActionError(e.response?.data?.error || t('agentMsg.failedTryAgain'))
     } finally {
       setGradeLoading(false)
     }
@@ -286,7 +365,7 @@ export default function AgentDashboard() {
         <span className="text-white text-3xl font-black">IG</span>
       </div>
       <Spinner size={8} />
-      <p className="text-gray-400 text-sm">Loading agent portal...</p>
+      <p className="text-gray-400 text-sm">{t('agentHeader.loadingPortal')}</p>
     </div>
   )
 
@@ -295,8 +374,8 @@ export default function AgentDashboard() {
       <p className="text-5xl">⚠️</p>
       <p className="font-bold text-gray-900">{error}</p>
       <div className="flex gap-3">
-        <button onClick={() => { logout(); navigate('/login') }} className="border border-gray-200 px-5 py-3 rounded-2xl font-bold text-gray-600">Logout</button>
-        <button onClick={() => load()} className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-bold">Retry</button>
+        <button onClick={() => { logout(); navigate('/login') }} className="border border-gray-200 px-5 py-3 rounded-2xl font-bold text-gray-600">{t('common.signOut')}</button>
+        <button onClick={() => load()} className="bg-blue-600 text-white px-5 py-3 rounded-2xl font-bold">{t('common.retry')}</button>
       </div>
     </div>
   )
@@ -307,7 +386,6 @@ export default function AgentDashboard() {
   const notifs    = dashData?.notifications     || []
   const stats     = dashData?.stats             || {}
   const aInfo     = dashData?.agent             || agentData
-  const unread    = dashData?.unreadNotifications || 0
 
   // ── Grade modal ──────────────────────────────────────────────────────────
   if (showGrade && selectedH) {
@@ -316,8 +394,8 @@ export default function AgentDashboard() {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="bg-gradient-to-br from-teal-800 to-teal-600 px-5 pt-12 pb-5">
-          <button onClick={() => { setShowGrade(false); setActionError('') }} className="text-teal-200 text-sm mb-3 block">← Back</button>
-          <h1 className="text-white text-xl font-black">🌿 Grade Miraa</h1>
+          <button onClick={() => { setShowGrade(false); setActionError('') }} className="text-teal-200 text-sm mb-3 block">{t('common.back')}</button>
+          <h1 className="text-white text-xl font-black">{t('gradeModal.title')}</h1>
           <p className="text-teal-200 text-sm">{selectedH.harvestNumber} · {selectedH.member?.fullName}</p>
         </div>
         <div className="px-4 py-5 space-y-4 pb-20">
@@ -325,7 +403,7 @@ export default function AgentDashboard() {
 
           {prices.length > 0 && (
             <div className="bg-green-50 border border-green-200 rounded-2xl p-3">
-              <p className="text-xs font-bold text-green-800 mb-2">📊 Today's Reference Prices</p>
+              <p className="text-xs font-bold text-green-800 mb-2">{t('gradeModal.refPrices')}</p>
               <div className="grid grid-cols-3 gap-2 text-center">
                 {prices.map((p: any) => (
                   <div key={p.id}>
@@ -352,19 +430,19 @@ export default function AgentDashboard() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-gray-400 mb-1 block">Weight (kg)</label>
+                    <label className="text-xs font-bold text-gray-400 mb-1 block">{t('gradeModal.weightKg')}</label>
                     <input type="number" value={item.weightKg} min="0" step="0.1" placeholder="0.0"
                       onChange={e => { const u=[...gradeItems]; u[idx]={...u[idx],weightKg:e.target.value}; setGradeItems(u) }}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-teal-500" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-400 mb-1 block">Price/kg (KES)</label>
+                    <label className="text-xs font-bold text-gray-400 mb-1 block">{t('gradeModal.pricePerKg')}</label>
                     <input type="number" value={item.pricePerKg} min="0" placeholder={ref?String(Math.round(Number(ref.buyingPrice))):'0'}
                       onChange={e => { const u=[...gradeItems]; u[idx]={...u[idx],pricePerKg:e.target.value}; setGradeItems(u) }}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-teal-500" />
                     {ref && !item.pricePerKg && (
                       <button onClick={() => { const u=[...gradeItems]; u[idx]={...u[idx],pricePerKg:String(Math.round(Number(ref.buyingPrice)))}; setGradeItems(u) }}
-                        className="text-xs text-teal-600 underline mt-0.5">Use today's price</button>
+                        className="text-xs text-teal-600 underline mt-0.5">{t('gradeModal.useTodaysPrice')}</button>
                     )}
                   </div>
                 </div>
@@ -374,18 +452,18 @@ export default function AgentDashboard() {
 
           {totalVal > 0 && (
             <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-4 flex justify-between items-center">
-              <div><p className="text-xs text-gray-400">Total Graded</p><p className="font-black text-gray-900">{totalWt.toFixed(1)} kg</p></div>
-              <div className="text-right"><p className="text-xs text-gray-400">Farmer Payment</p><p className="text-2xl font-black text-green-700">KES {Math.round(totalVal).toLocaleString()}</p></div>
+              <div><p className="text-xs text-gray-400">{t('gradeModal.totalGraded')}</p><p className="font-black text-gray-900">{totalWt.toFixed(1)} kg</p></div>
+              <div className="text-right"><p className="text-xs text-gray-400">{t('gradeModal.farmerPayment')}</p><p className="text-2xl font-black text-green-700">KES {Math.round(totalVal).toLocaleString()}</p></div>
             </div>
           )}
 
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3">
-            <p className="text-xs text-blue-700">ℹ️ As the assigned agent, you are responsible for accurate grading. The farmer will be paid based on these grades.</p>
+            <p className="text-xs text-blue-700">{t('gradeModal.responsibilityNote')}</p>
           </div>
 
           <button onClick={handleGrade} disabled={gradeLoading||totalVal===0}
             className="w-full bg-teal-600 disabled:bg-teal-300 text-white font-black py-4 rounded-2xl text-lg flex items-center justify-center gap-2">
-            {gradeLoading ? <><Spinner size={5} cls="text-white"/> Submitting...</> : `✅ Submit — KES ${Math.round(totalVal).toLocaleString()}`}
+            {gradeLoading ? <><Spinner size={5} cls="text-white"/> {t('gradeModal.submitting')}</> : t('gradeModal.submit', { amount: `KES ${Math.round(totalVal).toLocaleString()}` })}
           </button>
         </div>
       </div>
@@ -396,36 +474,36 @@ export default function AgentDashboard() {
   if (showQty && selectedH) return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-gradient-to-br from-purple-800 to-purple-600 px-5 pt-12 pb-5">
-        <button onClick={() => { setShowQty(false); setActionError('') }} className="text-purple-200 text-sm mb-3 block">← Back</button>
-        <h1 className="text-white text-xl font-black">⚖️ Record Actual Weight</h1>
-        <p className="text-purple-200 text-sm">Farmer estimated: {selectedH.estimatedWeightKg || '?'} kg</p>
+        <button onClick={() => { setShowQty(false); setActionError('') }} className="text-purple-200 text-sm mb-3 block">{t('common.back')}</button>
+        <h1 className="text-white text-xl font-black">{t('qtyModal.title')}</h1>
+        <p className="text-purple-200 text-sm">{t('qtyModal.farmerEstimated', { kg: selectedH.estimatedWeightKg || '?' })}</p>
       </div>
       <div className="px-4 py-5 space-y-4">
         {actionError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm">⚠️ {actionError}</div>}
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <label className="block text-sm font-bold text-gray-700 mb-2">Actual Weight (kg)</label>
+          <label className="block text-sm font-bold text-gray-700 mb-2">{t('qtyModal.actualWeight')}</label>
           <input type="number" value={actualKg} onChange={e => setActualKg(e.target.value)}
             placeholder="e.g. 47.5" step="0.1" min="0.1" inputMode="decimal"
             className="w-full px-4 py-5 border-2 border-gray-200 rounded-2xl text-5xl font-black text-center focus:outline-none focus:border-purple-500 bg-gray-50" />
           {actualKg && selectedH.estimatedWeightKg && (
             <div className={`rounded-xl p-3 mt-3 text-center text-sm font-bold ${Number(actualKg)>=Number(selectedH.estimatedWeightKg)?'bg-green-50 text-green-700':'bg-red-50 text-red-600'}`}>
-              Variance: {(Number(actualKg)-Number(selectedH.estimatedWeightKg)).toFixed(1)} kg
+              {t('agentCompleted.variance')}: {(Number(actualKg)-Number(selectedH.estimatedWeightKg)).toFixed(1)} kg
               {Number(actualKg)>=Number(selectedH.estimatedWeightKg) ? ' 📈' : ' 📉'}
             </div>
           )}
           <div className="mt-4">
-            <label className="block text-sm font-bold text-gray-700 mb-1">Notes (optional)</label>
+            <label className="block text-sm font-bold text-gray-700 mb-1">{t('qtyModal.notes')}</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-              placeholder="Any observations..."
+              placeholder={t('qtyModal.notesPlaceholder')}
               className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none" />
           </div>
         </div>
         <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-3">
-          <p className="text-xs text-yellow-800">⚠️ This weight determines the farmer's payment. Weigh accurately!</p>
+          <p className="text-xs text-yellow-800">{t('qtyModal.warning')}</p>
         </div>
         <button onClick={handleRecordQty} disabled={actionLoading || !actualKg || Number(actualKg)<=0}
           className="w-full bg-purple-600 disabled:bg-purple-300 text-white font-black py-4 rounded-2xl text-xl flex items-center justify-center gap-2">
-          {actionLoading ? <><Spinner size={5} cls="text-white"/> Recording...</> : `✅ Confirm ${actualKg ? actualKg+' kg' : ''}`}
+          {actionLoading ? <><Spinner size={5} cls="text-white"/> {t('qtyModal.recording')}</> : t('qtyModal.confirm', { kg: actualKg ? actualKg+' kg' : '' })}
         </button>
       </div>
     </div>
@@ -443,11 +521,11 @@ export default function AgentDashboard() {
     return (
       <div className="min-h-screen bg-gray-50 pb-10">
         <div className="bg-gradient-to-br from-blue-800 to-blue-600 px-5 pt-12 pb-5">
-          <button onClick={() => { setSelectedH(null); setActionError('') }} className="text-blue-200 text-sm mb-3 block">← Back to Dashboard</button>
-          <h1 className="text-white text-xl font-black">🌿 Harvest Details</h1>
+          <button onClick={() => { setSelectedH(null); setActionError('') }} className="text-blue-200 text-sm mb-3 block">{t('agentDetail.backToDashboard')}</button>
+          <h1 className="text-white text-xl font-black">{t('agentDetail.harvestDetails')}</h1>
           <p className="text-blue-200 text-sm">{selectedH.harvestNumber}</p>
           <span className={`inline-block mt-2 text-xs px-3 py-1 rounded-full font-bold ${STATUS_COLORS[selectedH.status] || 'bg-gray-100 text-gray-600'}`}>
-            {(selectedH.status||'').replace(/_/g,' ')}
+            {t(`status.${selectedH.status}`)}
           </span>
         </div>
 
@@ -473,28 +551,28 @@ export default function AgentDashboard() {
             </div>
             <div className="grid grid-cols-3 gap-2">
               <a href={`tel:${phone}`} className="bg-blue-600 text-white text-xs font-bold py-3 rounded-xl text-center flex flex-col items-center gap-0.5">
-                <span className="text-xl">📞</span> Call
+                <span className="text-xl">📞</span> {t('common.call')}
               </a>
               <a href={waLink} target="_blank" rel="noopener noreferrer"
                 className="bg-green-500 text-white text-xs font-bold py-3 rounded-xl text-center flex flex-col items-center gap-0.5">
-                <span className="text-xl">💬</span> WhatsApp
+                <span className="text-xl">💬</span> {t('common.whatsapp')}
               </a>
               <a href={`sms:${phone}`} className="bg-gray-600 text-white text-xs font-bold py-3 rounded-xl text-center flex flex-col items-center gap-0.5">
-                <span className="text-xl">✉️</span> SMS
+                <span className="text-xl">✉️</span> {t('common.sms')}
               </a>
             </div>
           </div>
 
           {/* Harvest info */}
           <div className="bg-white rounded-2xl shadow-sm p-4">
-            <p className="font-black text-gray-900 mb-3">📋 Harvest Information</p>
+            <p className="font-black text-gray-900 mb-3">{t('agentDetail.harvestInfo')}</p>
             <div className="space-y-2.5">
               {[
-                { label: 'Date',       value: selectedH.harvestDate ? new Date(selectedH.harvestDate).toLocaleDateString('en-KE', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '—' },
-                { label: 'Location',   value: selectedH.farmLocation || selectedH.member?.village || '—' },
-                { label: 'Est. Weight', value: selectedH.estimatedWeightKg > 0 ? `${selectedH.estimatedWeightKg} kg` : '—' },
-                ...(selectedH.actualWeightKg > 0 ? [{ label: 'Actual Weight', value: `${selectedH.actualWeightKg} kg` }] : []),
-                ...(selectedH.agentNotes ? [{ label: 'Your Notes', value: selectedH.agentNotes }] : []),
+                { label: t('agentDetail.date'),       value: selectedH.harvestDate ? new Date(selectedH.harvestDate).toLocaleDateString('en-KE', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '—' },
+                { label: t('agentDetail.location'),   value: selectedH.farmLocation || selectedH.member?.village || '—' },
+                { label: t('agentDetail.estWeight'),  value: selectedH.estimatedWeightKg > 0 ? `${selectedH.estimatedWeightKg} kg` : '—' },
+                ...(selectedH.actualWeightKg > 0 ? [{ label: t('agentDetail.actualWeight'), value: `${selectedH.actualWeightKg} kg` }] : []),
+                ...(selectedH.agentNotes ? [{ label: t('agentDetail.yourNotes'), value: selectedH.agentNotes }] : []),
               ].map(r => (
                 <div key={r.label} className="flex justify-between text-sm">
                   <span className="text-gray-400">{r.label}</span>
@@ -507,17 +585,17 @@ export default function AgentDashboard() {
           {/* Embedded Map */}
           <div className="bg-white rounded-2xl shadow-sm p-4">
             <div className="flex justify-between items-center mb-3">
-              <p className="font-black text-gray-900">🗺️ Farm Location</p>
+              <p className="font-black text-gray-900">{t('agentDetail.farmLocation')}</p>
               <a href={dirLink} target="_blank" rel="noopener noreferrer"
                 className="bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl">
-                Open in Google Maps
+                {t('agentDetail.openInGoogleMaps')}
               </a>
             </div>
             <EmbeddedMap harvest={selectedH} />
             <div className="flex items-center gap-4 mt-2 text-xs text-gray-400 justify-center">
-              <span>🟢 Farm</span>
-              <span>🔵 You</span>
-              <span>--- Route</span>
+              <span>{t('agentDetail.legendFarm')}</span>
+              <span>{t('agentDetail.legendYou')}</span>
+              <span>{t('agentDetail.legendRoute')}</span>
             </div>
           </div>
 
@@ -527,36 +605,36 @@ export default function AgentDashboard() {
               <>
                 <button onClick={() => doAction(selectedH.id, 'start-harvest')} disabled={actionLoading}
                   className="w-full bg-yellow-500 disabled:bg-yellow-300 text-white font-black py-4 rounded-2xl text-lg flex items-center justify-center gap-2">
-                  {actionLoading ? <><Spinner size={5} cls="text-white"/> Starting...</> : '🌿 Start Harvesting'}
+                  {actionLoading ? <><Spinner size={5} cls="text-white"/> {t('agentDetail.starting')}</> : t('agentDetail.startHarvesting')}
                 </button>
                 <button onClick={() => doAction(selectedH.id, 'remove-agent')} disabled={actionLoading}
                   className="w-full border-2 border-red-200 text-red-600 font-bold py-3 rounded-2xl">
-                  ✗ Cancel / Cannot Harvest (Unassign)
+                  {t('agentDetail.cancelUnassign')}
                 </button>
               </>
             )}
             {selectedH.status === 'harvesting' && (
               <button onClick={() => { setShowQty(true); setActualKg(''); setNotes('') }}
                 className="w-full bg-purple-600 text-white font-black py-4 rounded-2xl text-lg">
-                ⚖️ Record Actual Weight
+                {t('agentDetail.recordActualWeight')}
               </button>
             )}
             {selectedH.status === 'picked_up' && (
               <>
                 <button onClick={() => setShowGrade(true)}
                   className="w-full bg-teal-600 text-white font-black py-4 rounded-2xl text-lg">
-                  🌿 Grade Miraa (Set Grades & Prices)
+                  {t('agentDetail.gradeMiraaSet')}
                 </button>
                 <button onClick={() => doAction(selectedH.id, 'deliver')} disabled={actionLoading}
                   className="w-full bg-orange-600 disabled:bg-orange-300 text-white font-bold py-3 rounded-2xl">
-                  {actionLoading ? 'Delivering...' : '🏭 Deliver to SACCO'}
+                  {actionLoading ? t('agentDetail.delivering') : t('agentDetail.deliverToSacco')}
                 </button>
               </>
             )}
             {selectedH.status === 'delivered_to_sacco' && (
               <button onClick={() => setShowGrade(true)}
                 className="w-full bg-teal-600 text-white font-black py-4 rounded-2xl text-lg">
-                🌿 Grade Miraa
+                {t('agentDetail.gradeMiraa')}
               </button>
             )}
           </div>
@@ -575,11 +653,11 @@ export default function AgentDashboard() {
 
         <div className="flex justify-between items-start relative mb-5">
           <div>
-            <p className="text-blue-300 text-xs font-medium tracking-wide">🌿 AGENT PORTAL</p>
+            <p className="text-blue-300 text-xs font-medium tracking-wide">{t('agentHeader.portalTag')}</p>
             <h1 className="text-white text-2xl font-black mt-0.5">
               {String(aInfo?.fullName||'').split(' ')[0]}!
             </h1>
-            <p className="text-blue-300 text-xs">{aInfo?.agentCode} · {aInfo?.vehicleReg || 'No vehicle'}</p>
+            <p className="text-blue-300 text-xs">{aInfo?.agentCode} · {aInfo?.vehicleReg || t('agentHeader.noVehicle')}</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => load(false)} className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
@@ -591,24 +669,17 @@ export default function AgentDashboard() {
                 <span>🌿</span>
               </button>
             )}
-            {unread > 0 && (
-              <div className="relative">
-                <button onClick={() => setTab('profile')} className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
-                  <span>🔔</span>
-                </button>
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-black rounded-full flex items-center justify-center">{unread}</span>
-              </div>
-            )}
+            <NotificationBell />
           </div>
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-2 relative">
           {[
-            { label:'Assigned',  value: stats.confirmed || 0 },
-            { label:'Harvesting', value: stats.harvesting || 0 },
-            { label:'Transit',   value: stats.inTransit || 0 },
-            { label:'Done',      value: stats.totalCompleted || 0 },
+            { label: t('agentHeader.assigned'),   value: stats.confirmed || 0 },
+            { label: t('agentHeader.harvesting'), value: stats.harvesting || 0 },
+            { label: t('agentHeader.transit'),    value: stats.inTransit || 0 },
+            { label: t('agentHeader.done'),       value: stats.totalCompleted || 0 },
           ].map(s => (
             <div key={s.label} className="bg-white/15 rounded-2xl p-3 text-center">
               <p className="text-2xl font-black text-white">{s.value}</p>
@@ -620,7 +691,7 @@ export default function AgentDashboard() {
         {/* Quick price preview */}
         {prices.length > 0 && (
           <div className="mt-3 bg-white/10 rounded-2xl p-3 relative">
-            <p className="text-blue-200 text-xs font-bold mb-2">📊 Today's Miraa Prices</p>
+            <p className="text-blue-200 text-xs font-bold mb-2">{t('agentHeader.todayPrices')}</p>
             <div className="grid grid-cols-3 gap-2">
               {prices.map((p: any) => (
                 <div key={p.id} className="text-center">
@@ -648,14 +719,14 @@ export default function AgentDashboard() {
       <div className="px-4 mt-3">
         <div className="flex gap-1.5 bg-gray-100 rounded-2xl p-1.5">
           {[
-            { id:'active',    label:`🌿 Active (${active.length})` },
-            { id:'completed', label:`✅ Done (${completed.length})` },
-            { id:'prices',    label:'📊 Prices' },
-            { id:'profile',   label:'👤 Profile' },
-          ].map(t => (
-            <button key={t.id} onClick={() => setTab(t.id as AgentTab)}
-              className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${tab===t.id?'bg-white text-blue-700 shadow-sm':'text-gray-500'}`}>
-              {t.label}
+            { id:'active',    label: t('agentActive.tabLabel', { count: active.length }) },
+            { id:'completed', label: t('agentCompleted.tabLabel', { count: completed.length }) },
+            { id:'prices',    label: t('agentPrices.tabLabel') },
+            { id:'profile',   label: t('agentProfile.tabLabel') },
+          ].map(tabItem => (
+            <button key={tabItem.id} onClick={() => setTab(tabItem.id as AgentTab)}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${tab===tabItem.id?'bg-white text-blue-700 shadow-sm':'text-gray-500'}`}>
+              {tabItem.label}
             </button>
           ))}
         </div>
@@ -667,8 +738,8 @@ export default function AgentDashboard() {
           {active.length === 0 ? (
             <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
               <p className="text-5xl mb-4">✅</p>
-              <p className="font-bold text-gray-900">No active assignments</p>
-              <p className="text-gray-400 text-sm mt-1">All caught up! 🎉</p>
+              <p className="font-bold text-gray-900">{t('agentActive.noAssignments')}</p>
+              <p className="text-gray-400 text-sm mt-1">{t('agentActive.allCaughtUp')}</p>
             </div>
           ) : (
             active.map((h: any) => (
@@ -677,7 +748,7 @@ export default function AgentDashboard() {
                 <div className={`flex justify-between items-center px-4 py-2.5 ${STATUS_COLORS[h.status]||'bg-gray-100'}`}>
                   <span className="font-black text-sm">{h.harvestNumber}</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-xs font-bold capitalize">{(h.status||'').replace(/_/g,' ')}</span>
+                    <span className="text-xs font-bold capitalize">{t(`status.${h.status}`)}</span>
                     <span className="text-base font-black opacity-60">›</span>
                   </div>
                 </div>
@@ -695,10 +766,10 @@ export default function AgentDashboard() {
                     {h.harvestDate && <span>📅 {new Date(h.harvestDate).toLocaleDateString('en-KE',{day:'numeric',month:'short'})}</span>}
                     {h.farmLocation && <span className="truncate">📍 {h.farmLocation}</span>}
                     {h.member?.phoneNumber && <span>📞 {h.member.phoneNumber}</span>}
-                    {h.estimatedWeightKg > 0 && <span>⚖️ Est: {h.estimatedWeightKg} kg</span>}
+                    {h.estimatedWeightKg > 0 && <span>{t('agentActive.est', { kg: h.estimatedWeightKg })}</span>}
                   </div>
                   <div className="bg-blue-50 rounded-xl px-3 py-2 text-xs text-blue-700 font-medium">
-                    👆 Tap to view details, map & take action → {STATUS_NEXT[h.status] || 'View'}
+                    {t('agentActive.tapToView')} {STATUS_NEXT_KEY[h.status] ? t(STATUS_NEXT_KEY[h.status]) : t('agentActive.view')}
                   </div>
                 </div>
               </button>
@@ -713,7 +784,7 @@ export default function AgentDashboard() {
           {completed.length === 0 ? (
             <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
               <p className="text-4xl mb-3">📋</p>
-              <p className="font-bold text-gray-700">No completed harvests yet</p>
+              <p className="font-bold text-gray-700">{t('agentCompleted.none')}</p>
             </div>
           ) : (
             completed.map((h: any) => {
@@ -726,23 +797,23 @@ export default function AgentDashboard() {
                       <p className="font-bold text-gray-900">{h.harvestNumber}</p>
                       <p className="text-gray-400 text-xs">{h.member?.fullName} · {h.member?.village}</p>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${STATUS_COLORS[h.status]||'bg-gray-100 text-gray-600'}`}>{h.status}</span>
+                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${STATUS_COLORS[h.status]||'bg-gray-100 text-gray-600'}`}>{t(`status.${h.status}`)}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="bg-gray-50 rounded-xl p-2">
-                      <p className="text-gray-400">Estimated</p>
+                      <p className="text-gray-400">{t('agentCompleted.estimated')}</p>
                       <p className="font-bold text-blue-600">{h.estimatedWeightKg>0?h.estimatedWeightKg+' kg':'—'}</p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-2">
-                      <p className="text-gray-400">Actual</p>
+                      <p className="text-gray-400">{t('agentCompleted.actual')}</p>
                       <p className="font-bold">{h.actualWeightKg>0?h.actualWeightKg+' kg':'—'}</p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-2">
-                      <p className="text-gray-400">Variance</p>
+                      <p className="text-gray-400">{t('agentCompleted.variance')}</p>
                       <p className={`font-bold ${varKg>=0?'text-green-600':'text-red-500'}`}>{varKg!==0?`${varKg>=0?'+':''}${varKg.toFixed(1)} kg`:'—'}</p>
                     </div>
                   </div>
-                  {val > 0 && <p className="text-center font-black text-green-600 mt-2 text-sm">KES {val.toLocaleString()} earned</p>}
+                  {val > 0 && <p className="text-center font-black text-green-600 mt-2 text-sm">{t('agentCompleted.earned', { amount: `KES ${val.toLocaleString()}` })}</p>}
                 </div>
               )
             })
@@ -753,10 +824,10 @@ export default function AgentDashboard() {
       {/* ── Prices ── */}
       {tab === 'prices' && (
         <div className="px-4 mt-4 space-y-4">
-          <p className="font-black text-gray-900">📊 Current Miraa Prices</p>
+          <p className="font-black text-gray-900">{t('agentPrices.title')}</p>
           {prices.length === 0 ? (
             <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
-              <p className="text-gray-400">No prices set today</p>
+              <p className="text-gray-400">{t('agentPrices.none')}</p>
             </div>
           ) : (
             prices.map((p: any) => (
@@ -764,19 +835,19 @@ export default function AgentDashboard() {
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="font-black text-gray-900 text-xl">{p.miraaGrade}</p>
-                    <p className="text-gray-400 text-xs">{p.effectiveDate ? new Date(p.effectiveDate).toLocaleDateString('en-KE') : 'Today'}</p>
+                    <p className="text-gray-400 text-xs">{p.effectiveDate ? new Date(p.effectiveDate).toLocaleDateString('en-KE') : '—'}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-400">Buying Price</p>
+                    <p className="text-xs text-gray-400">{t('agentPrices.buyingPrice')}</p>
                     <p className="font-black text-green-700 text-3xl">KES {Number(p.buyingPrice).toLocaleString()}</p>
-                    <p className="text-xs text-gray-400">Selling: KES {Number(p.sellingPrice).toLocaleString()}/kg</p>
+                    <p className="text-xs text-gray-400">{t('agentPrices.selling', { amount: `KES ${Number(p.sellingPrice).toLocaleString()}` })}</p>
                   </div>
                 </div>
               </div>
             ))
           )}
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3">
-            <p className="text-xs text-blue-700">ℹ️ Use the buying price when grading farmer miraa. Prices are set daily by the SACCO office.</p>
+            <p className="text-xs text-blue-700">{t('agentPrices.hint')}</p>
           </div>
         </div>
       )}
@@ -790,16 +861,16 @@ export default function AgentDashboard() {
             </div>
             <h3 className="text-2xl font-black">{aInfo?.fullName}</h3>
             <p className="text-blue-200 text-sm">{aInfo?.agentCode}</p>
-            <p className="text-blue-300 text-xs mt-1">{aInfo?.role || 'Harvest Agent'}</p>
+            <p className="text-blue-300 text-xs mt-1">{aInfo?.role || t('agentProfile.defaultRole')}</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm p-4 space-y-2.5">
-            <p className="font-black text-gray-900 mb-2">Agent Details</p>
+            <p className="font-black text-gray-900 mb-2">{t('agentProfile.agentDetails')}</p>
             {[
-              { label:'📱 Phone',    value: aInfo?.phoneNumber },
-              { label:'🚗 Vehicle',  value: aInfo?.vehicleReg || 'Not set' },
-              { label:'🔑 Code',     value: aInfo?.agentCode },
-              { label:'📋 Role',     value: aInfo?.role || 'Harvest Agent' },
+              { label: t('agentProfile.phone'),   value: aInfo?.phoneNumber },
+              { label: t('agentProfile.vehicle'), value: aInfo?.vehicleReg || t('agentProfile.notSet') },
+              { label: t('agentProfile.code'),    value: aInfo?.agentCode },
+              { label: t('agentProfile.role'),    value: aInfo?.role || t('agentProfile.defaultRole') },
             ].map(r => (
               <div key={r.label} className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                 <span className="text-gray-400 text-sm">{r.label}</span>
@@ -808,10 +879,16 @@ export default function AgentDashboard() {
             ))}
           </div>
 
+          {/* Language */}
+          <div className="bg-white rounded-2xl shadow-sm p-4 flex items-center justify-between">
+            <span className="text-gray-700 text-sm font-bold">🌐 {t('common.changeLanguage')}</span>
+            <LanguageSwitcher />
+          </div>
+
           {/* Notifications */}
           {notifs.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm p-4">
-              <p className="font-black text-gray-900 mb-3">🔔 Notifications</p>
+              <p className="font-black text-gray-900 mb-3">{t('agentProfile.notifications')}</p>
               <div className="space-y-2">
                 {notifs.slice(0,5).map((n: any) => (
                   <div key={n.id} className={`p-3 rounded-xl ${n.isRead?'bg-gray-50':'bg-blue-50 border border-blue-100'}`}>
@@ -826,11 +903,11 @@ export default function AgentDashboard() {
 
           {/* SACCO Office */}
           <div className="bg-white rounded-2xl shadow-sm p-4 space-y-2">
-            <p className="font-black text-gray-900 mb-2">🏦 SACCO Office</p>
+            <p className="font-black text-gray-900 mb-2">🏦 {t('common.saccoOffice')}</p>
             <a href="tel:0757630995" className="flex items-center gap-3 bg-green-50 rounded-xl p-3">
               <span className="text-2xl">📞</span>
               <div>
-                <p className="font-bold text-sm text-gray-900">Call SACCO Office</p>
+                <p className="font-bold text-sm text-gray-900">{t('common.callSaccoOffice')}</p>
                 <p className="text-green-600 text-xs">0757 630 995</p>
               </div>
             </a>
@@ -838,22 +915,22 @@ export default function AgentDashboard() {
               className="flex items-center gap-3 bg-green-50 rounded-xl p-3">
               <span className="text-2xl">💬</span>
               <div>
-                <p className="font-bold text-sm text-gray-900">WhatsApp SACCO</p>
+                <p className="font-bold text-sm text-gray-900">{t('common.whatsappSacco')}</p>
                 <p className="text-green-600 text-xs">+254 757 630 995</p>
               </div>
             </a>
             <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
               <span className="text-2xl">🕐</span>
               <div>
-                <p className="font-bold text-sm text-gray-900">Office Hours</p>
-                <p className="text-gray-500 text-xs">Mon–Fri · 8:00am – 5:00pm</p>
+                <p className="font-bold text-sm text-gray-900">{t('common.officeHoursLabel')}</p>
+                <p className="text-gray-500 text-xs">{t('common.officeHours')}</p>
               </div>
             </div>
           </div>
 
           <button onClick={() => { logout(); navigate('/login',{replace:true}) }}
             className="w-full bg-red-50 border border-red-200 text-red-600 font-bold py-3 rounded-2xl text-sm">
-            🚪 Sign Out
+            🚪 {t('common.signOut')}
           </button>
         </div>
       )}
