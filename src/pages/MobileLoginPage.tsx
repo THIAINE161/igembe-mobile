@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
+import LanguageSwitcher from '../components/LanguageSwitcher'
+import { useT } from '../lib/useT'
 import api from '../lib/api'
 
 export default function MobileLoginPage() {
   const navigate = useNavigate()
   const { setAuth } = useMobileStore()
+  const t = useT()
 
   const [phoneNumber, setPhoneNumber] = useState('')
   const [pin, setPin] = useState('')
@@ -17,8 +20,8 @@ export default function MobileLoginPage() {
     e.preventDefault()
     setError('')
     const cleanPhone = phoneNumber.replace(/\s/g, '').trim()
-    if (!cleanPhone) { setError('Enter your phone number'); return }
-    if (!pin || pin.length !== 4) { setError('Enter your 4-digit PIN'); return }
+    if (!cleanPhone) { setError(t('login.errPhoneRequired')); return }
+    if (!pin || pin.length !== 4) { setError(t('login.errPinRequired')); return }
 
     setLoading(true)
     try {
@@ -33,9 +36,9 @@ export default function MobileLoginPage() {
       })
       if (data.roles?.includes('farmer')) navigate('/farmer', { replace: true })
       else if (data.roles?.includes('agent')) navigate('/agent', { replace: true })
-      else setError('Account type not recognized. Contact SACCO.')
+      else setError(t('login.errUnknownAccount'))
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Check your number and PIN.')
+      setError(err.response?.data?.error || t('login.errLoginFailed'))
     } finally {
       setLoading(false)
     }
@@ -62,6 +65,11 @@ export default function MobileLoginPage() {
       <div className="relative z-10 flex flex-col min-h-screen">
         <div className="flex-1 flex flex-col items-center justify-center px-5 pt-16 pb-6">
 
+          {/* Language toggle */}
+          <div className="mb-4">
+            <LanguageSwitcher variant="light" />
+          </div>
+
           {/* Logo */}
           <div className="mb-6 flex flex-col items-center">
             <div className="w-24 h-24 bg-white rounded-3xl shadow-2xl flex items-center justify-center border-4 border-green-400/60 mb-4">
@@ -74,14 +82,14 @@ export default function MobileLoginPage() {
               Igembe SACCO
             </h1>
             <p className="text-green-300 text-sm text-center mt-1">
-              🌿 Miraa Farmers Cooperative Society
+              {t('login.tagline')}
             </p>
           </div>
 
           {/* Card */}
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-white/30 p-7">
-            <h2 className="text-xl font-black text-gray-900">Welcome Back 👋</h2>
-            <p className="text-gray-400 text-xs mt-0.5 mb-5">Sign in with your registered phone number</p>
+            <h2 className="text-xl font-black text-gray-900">{t('login.welcomeBack')}</h2>
+            <p className="text-gray-400 text-xs mt-0.5 mb-5">{t('login.signInSubtitle')}</p>
 
             {/* Error */}
             {error && (
@@ -95,7 +103,7 @@ export default function MobileLoginPage() {
               {/* Phone */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-                  Phone Number
+                  {t('login.phoneLabel')}
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">📱</span>
@@ -110,13 +118,13 @@ export default function MobileLoginPage() {
                     className="w-full pl-10 pr-4 py-3.5 border-2 border-gray-200 rounded-2xl text-sm font-medium text-gray-900 placeholder-gray-300 focus:outline-none focus:border-green-500 bg-gray-50/80 transition-colors"
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Use your number registered with SACCO</p>
+                <p className="text-xs text-gray-400 mt-1">{t('login.phoneHint')}</p>
               </div>
 
               {/* PIN */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-                  4-Digit PIN
+                  {t('login.pinLabel')}
                 </label>
                 <div className="relative">
                   <input
@@ -147,7 +155,7 @@ export default function MobileLoginPage() {
               {/* Hint */}
               <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
                 <p className="text-xs text-blue-700">
-                  <span className="font-bold">First time?</span> Enter any 4-digit PIN — it becomes your permanent PIN automatically.
+                  <span className="font-bold">{t('login.firstTimeTitle')}</span> {t('login.firstTimeHint')}
                 </p>
               </div>
 
@@ -163,30 +171,30 @@ export default function MobileLoginPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                     </svg>
-                    Signing in...
+                    {t('login.signingIn')}
                   </>
-                ) : 'Sign In →'}
+                ) : t('login.signIn')}
               </button>
             </form>
 
             <div className="mt-4 text-center">
               <button onClick={() => navigate('/forgot-pin')}
                 className="text-green-600 text-sm font-bold hover:text-green-700 transition-colors">
-                Forgot PIN? Reset it →
+                {t('login.forgotPin')}
               </button>
             </div>
           </div>
 
           {/* Contact */}
           <div className="mt-5 text-center">
-            <p className="text-green-400 text-xs">Not registered? Visit Igembe SACCO office</p>
+            <p className="text-green-400 text-xs">{t('login.notRegistered')}</p>
             <p className="text-green-300 text-sm font-bold mt-1">📞 0757 630 995</p>
           </div>
         </div>
 
         {/* Footer */}
         <div className="relative pb-5 text-center">
-          <p className="text-green-600/80 text-xs">© 2024 Igembe SACCO · Powered by Igembe Tech Solutions</p>
+          <p className="text-green-600/80 text-xs">{t('login.poweredBy')}</p>
         </div>
       </div>
     </div>
