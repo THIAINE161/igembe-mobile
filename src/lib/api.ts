@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { useMobileStore } from '../store/mobileStore'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://igembe-backend.onrender.com'
+export const API_URL = import.meta.env.VITE_API_URL || 'https://igembe-backend.onrender.com'
 
 const api = axios.create({
   baseURL: API_URL,
@@ -24,9 +24,18 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// Handle auth errors globally
+// Handle auth errors globally, and opportunistically pick up a refreshed
+// token if the backend included one (see mobileAuth.ts login route) — checked
+// generically on every response body so any endpoint can adopt this pattern
+// later without another client-side change.
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const refreshedToken = response.data?.refreshedToken
+    if (refreshedToken && typeof refreshedToken === 'string') {
+      useMobileStore.getState().setToken(refreshedToken)
+    }
+    return response
+  },
   (error) => {
     if (error.response?.status === 401) {
       // Token expired or invalid — log out
