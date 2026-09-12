@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { Suspense, lazy } from 'react'
 import { useMobileStore } from './store/mobileStore'
+import { useSSE } from './lib/useSSE'
 
 // ── Always-needed pages (eager import) ───────────────────────────────────────
 import MobileLoginPage from './pages/MobileLoginPage'
@@ -12,6 +13,7 @@ const MpesaPaymentPage   = lazy(() => import('./pages/MpesaPaymentPage'))
 const HarvestSchedulePage = lazy(() => import('./pages/HarvestSchedulePage'))
 const HarvestEditPage    = lazy(() => import('./pages/HarvestEditPage'))
 const LoanApplicationPage = lazy(() => import('./pages/LoanApplicationPage'))
+const LoanCalculatorPage = lazy(() => import('./pages/LoanCalculatorPage'))
 const AgrovetOrderPage   = lazy(() => import('./pages/AgrovetOrderPage'))
 const AgentDashboard     = lazy(() => import('./pages/AgentDashboard'))
 const ResetPinPage       = lazy(() => import('./pages/ResetPinPage'))
@@ -73,6 +75,11 @@ function RoleRedirect() {
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  // Mounted at the root (not inside individual dashboards) so the SSE
+  // connection — and the notifications it feeds into the store — survive
+  // navigation between pages instead of dropping and losing events in between.
+  useSSE()
+
   return (
     <Router>
       <Suspense fallback={<PageLoader />}>
@@ -139,6 +146,16 @@ export default function App() {
             element={
               <ProtectedRoute requiredRole="farmer">
                 <LoanApplicationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Loan calculator — plan a loan before applying */}
+          <Route
+            path="/farmer/loan/calculator"
+            element={
+              <ProtectedRoute requiredRole="farmer">
+                <LoanCalculatorPage />
               </ProtectedRoute>
             }
           />
