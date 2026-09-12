@@ -1,7 +1,90 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
+
+// ── Tap-to-pin farm location picker (optional) ────────────────────────────────
+// Kept deliberately simple: tap/click anywhere on the map to drop a pin, or
+// drag the pin once placed. No route/live-tracking here — that's the agent
+// dashboard's job; this just captures a single point.
+function FarmLocationPicker({
+  lat, lng, onPick,
+}: {
+  lat: number | null
+  lng: number | null
+  onPick: (lat: number, lng: number) => void
+}) {
+  const mapRef = useRef<HTMLDivElement>(null)
+  const mapInst = useRef<any>(null)
+  const markerRef = useRef<any>(null)
+
+  useEffect(() => {
+    if (!mapRef.current || mapInst.current) return
+
+    const defaultLat = lat ?? -0.3
+    const defaultLng = lng ?? 37.65
+
+    const map = L.map(mapRef.current, {
+      zoomControl: true,
+      attributionControl: true,
+      scrollWheelZoom: false,
+    }).setView([defaultLat, defaultLng], lat != null ? 16 : 11)
+    mapInst.current = map
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map)
+
+    const pinIcon = L.divIcon({
+      html: `<div style="background:#16a34a;color:white;border-radius:50% 50% 50% 0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 3px 10px rgba(0,0,0,0.35);transform:rotate(-45deg);border:3px solid white;">
+               <span style="transform:rotate(45deg)">🌿</span>
+             </div>`,
+      className: '',
+      iconSize: [34, 34],
+      iconAnchor: [17, 34],
+    })
+
+    const placeMarker = (latlng: { lat: number; lng: number }) => {
+      if (markerRef.current) {
+        markerRef.current.setLatLng(latlng)
+      } else {
+        markerRef.current = L.marker(latlng, { icon: pinIcon, draggable: true }).addTo(map)
+        markerRef.current.on('dragend', () => {
+          const p = markerRef.current.getLatLng()
+          onPick(p.lat, p.lng)
+        })
+      }
+    }
+
+    if (lat != null && lng != null) placeMarker({ lat, lng })
+
+    map.on('click', (e: any) => {
+      placeMarker(e.latlng)
+      onPick(e.latlng.lat, e.latlng.lng)
+    })
+
+    // Best-effort: center on the farmer's current GPS position if no pin yet.
+    if (lat == null && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => map.setView([pos.coords.latitude, pos.coords.longitude], 15),
+        () => {},
+        { timeout: 5000 }
+      )
+    }
+
+    return () => {
+      try { map.remove() } catch (_) {}
+      mapInst.current = null
+      markerRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return <div ref={mapRef} style={{ height: 220, borderRadius: 16, overflow: 'hidden' }} />
+}
 
 export default function HarvestSchedulePage() {
   const navigate = useNavigate()
@@ -16,6 +99,11 @@ export default function HarvestSchedulePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState<any>(null)
 
+  // Optional exact-location pin
+  const [showMap, setShowMap] = useState(false)
+  const [farmLat, setFarmLat] = useState<number | null>(null)
+  const [farmLng, setFarmLng] = useState<number | null>(null)
+
   if (!member) { navigate('/login', { replace: true }); return null }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,6 +116,8 @@ export default function HarvestSchedulePage() {
         memberId: member.id,
         harvestDate: form.harvestDate,
         farmLocation: form.farmLocation.trim() || null,
+        farmLatitude: farmLat ?? undefined,
+        farmLongitude: farmLng ?? undefined,
         estimatedWeightKg: form.estimatedWeightKg ? Number(form.estimatedWeightKg) : undefined,
         notes: form.notes.trim() || null
       })
@@ -58,6 +148,9 @@ export default function HarvestSchedulePage() {
               <p className="text-xs text-gray-500 mt-2">Location</p>
               <p className="font-bold text-gray-900">{form.farmLocation}</p>
             </>
+          )}
+          {farmLat != null && farmLng != null && (
+            <p className="text-xs text-green-600 font-bold mt-2">📍 Exact location pinned on map</p>
           )}
         </div>
         <p className="text-gray-500 text-sm mb-5">An agent will be assigned soon. You will receive an SMS confirmation.</p>
@@ -93,6 +186,29 @@ export default function HarvestSchedulePage() {
             <input type="text" value={form.farmLocation} onChange={e => setForm(f => ({ ...f, farmLocation: e.target.value }))}
               placeholder="e.g. Mutuati, Laare, Maua"
               className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 bg-gray-50 text-sm" />
+
+            {/* Optional exact-pin map */}
+            {!showMap ? (
+              <button type="button" onClick={() => setShowMap(true)}
+                className="w-full mt-2 border-2 border-dashed border-gray-200 text-gray-500 text-xs font-bold py-2.5 rounded-xl hover:border-green-400 hover:text-green-600 transition-colors">
+                🗺️ Pin exact location on map (optional)
+              </button>
+            ) : (
+              <div className="mt-2 space-y-2">
+                <FarmLocationPicker lat={farmLat} lng={farmLng} onPick={(la, ln) => { setFarmLat(la); setFarmLng(ln) }} />
+                <p className="text-xs text-gray-400">Tap anywhere on the map to drop a pin, or drag it to adjust.</p>
+                <div className="flex items-center justify-between">
+                  {farmLat != null ? (
+                    <span className="text-xs font-bold text-green-700">📍 Pin set ({farmLat.toFixed(4)}, {farmLng!.toFixed(4)})</span>
+                  ) : <span className="text-xs text-gray-400">No pin placed yet</span>}
+                  <button type="button"
+                    onClick={() => { setShowMap(false); setFarmLat(null); setFarmLng(null) }}
+                    className="text-xs font-bold text-red-500">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">⚖️ Estimated Weight (kg)</label>
