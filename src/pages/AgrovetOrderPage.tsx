@@ -123,7 +123,7 @@ export default function AgrovetOrderPage() {
         isCredit: false
       })
 
-      const { orderNumber, totalAmount, id: orderId } = orderRes.data.data
+      const { orderNumber, totalAmount } = orderRes.data.data
 
       if (payMethod === 'mpesa') {
         // Navigate to M-Pesa payment page

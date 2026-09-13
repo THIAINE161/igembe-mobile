@@ -5,7 +5,7 @@ export default function RoleSelectPage() {
   const navigate = useNavigate()
   const { member, agent, setActiveRole } = useMobileStore()
 
-  const selectRole = (role: string) => {
+  const selectRole = (role: 'farmer' | 'agent') => {
     setActiveRole(role)
     if (role === 'farmer') navigate('/farmer')
     else navigate('/agent')

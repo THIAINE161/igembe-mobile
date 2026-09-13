@@ -5,7 +5,7 @@ import api from '../lib/api'
 
 export default function ProfilePage() {
   const navigate = useNavigate()
-  const { member, agent, driver, roles, logout, updateMember } = useMobileStore()
+  const { member, agent, driver, roles, logout, setMember } = useMobileStore()
   const [showChangePin, setShowChangePin] = useState(false)
   const [currentPin, setCurrentPin] = useState('')
   const [newPin, setNewPin] = useState('')
@@ -74,10 +74,7 @@ export default function ProfilePage() {
 
         const photoUrl = response.data.photoUrl || imageToUpload
         setPhotoPreview(photoUrl)
-
-        if (updateMember) {
-          updateMember({ ...member, profilePhotoUrl: photoUrl })
-        }
+        setMember({ ...member!, profilePhotoUrl: photoUrl })
 
         setSuccess('Profile photo updated! ✅')
         setTimeout(() => setSuccess(''), 4000)
@@ -89,9 +86,7 @@ export default function ProfilePage() {
           await api.patch(`/api/members/${member!.id}`, {
             profilePhotoUrl: imageToUpload.substring(0, 800000)
           })
-          if (updateMember) {
-            updateMember({ ...member, profilePhotoUrl: imageToUpload })
-          }
+          setMember({ ...member!, profilePhotoUrl: imageToUpload })
           setSuccess('Photo saved! ✅')
           setTimeout(() => setSuccess(''), 4000)
         } catch (err2: any) {

@@ -42,7 +42,6 @@ export default function MpesaPaymentPage() {
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState('')
   const [stage,     setStage]     = useState<Stage>('input')
-  const [crid,      setCrid]      = useState('')
   const [resultMsg, setResultMsg] = useState('')
   const [receipt,   setReceipt]   = useState('')
   const [newBalance,setNewBalance]= useState<number | null>(null)
@@ -130,7 +129,6 @@ export default function MpesaPaymentPage() {
         })
         const checkoutId = r.data?.checkoutRequestId
         if (checkoutId) {
-          setCrid(checkoutId)
           setStage('polling')
           startPolling(checkoutId)
         } else {
@@ -150,7 +148,6 @@ export default function MpesaPaymentPage() {
         })
         const checkoutId = r.data?.checkoutRequestId
         if (checkoutId) {
-          setCrid(checkoutId)
           setStage('polling')
           startPolling(checkoutId)
         } else {
