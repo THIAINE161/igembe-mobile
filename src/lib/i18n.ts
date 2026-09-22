@@ -43,6 +43,8 @@ const en: Dict = {
     notifications: 'Notifications',
     noNotifications: 'No notifications yet',
     justNow: 'Just now',
+    markAllRead: 'Mark all as read',
+    viewHarvest: 'View Harvest',
   },
   nav: {
     home: 'Home',
@@ -345,6 +347,8 @@ const sw: Dict = {
     notifications: 'Arifa',
     noNotifications: 'Hakuna arifa bado',
     justNow: 'Sasa hivi',
+    markAllRead: 'Weka zote kama zimesomwa',
+    viewHarvest: 'Ona Mavuno',
   },
   nav: {
     home: 'Nyumbani',
@@ -648,6 +652,8 @@ const km: Dict = {
     notifications: 'Ũmenyithanio',
     noNotifications: 'Gũtirĩ ũmenyithanio nginya rĩu',
     justNow: 'O rĩu',
+    markAllRead: 'Ĩka ciothe ta itharĩtwo',
+    viewHarvest: 'Rora Magetha',
   },
   nav: {
     home: 'Mũciĩ',

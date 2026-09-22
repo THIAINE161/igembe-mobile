@@ -1,0 +1,16 @@
+{
+  "name": "Igembe SACCO",
+  "short_name": "Igembe SACCO",
+  "description": "Manage your Igembe Miraa Farmers SACCO savings, loans, and harvests from your phone.",
+  "start_url": "/",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9fafb",
+  "theme_color": "#16a34a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

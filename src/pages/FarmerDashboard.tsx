@@ -151,6 +151,9 @@ export default function FarmerDashboard() {
 
   const savAcc     = savAccounts.find((a: any) => a.accountType === 'savings')
   const totalSav   = Number(savAcc?.balance || 0)
+  // Lifetime harvest earnings history — separate from totalSav, which is the
+  // withdrawable balance and shrinks as the farmer withdraws.
+  const totalHarvestEarnings = Number(d.totalHarvestEarnings || 0)
   const shareBal   = Number(shareCapital.balance || 0)
   const activeLoan = allLoans.find((l: any) => ['disbursed','repaying'].includes(l.status))
   const latestH    = harvests[0]
@@ -199,7 +202,7 @@ export default function FarmerDashboard() {
               className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
               {refreshing ? <Spinner size={4} cls="text-white" /> : <span className="text-white">🔄</span>}
             </button>
-            <NotificationBell />
+            <NotificationBell onViewHarvest={() => setTab('harvests')} />
             <button onClick={() => setTab('profile')}
               className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
               <span className="text-white text-sm font-black">{String(mem?.fullName || 'U').charAt(0)}</span>
@@ -213,7 +216,7 @@ export default function FarmerDashboard() {
           <p className="text-white text-4xl font-black mt-0.5">KES {totalSav.toLocaleString()}</p>
           <div className="flex gap-4 mt-2">
             <div><p className="text-green-300 text-xs">{t('farmerHome.shareCapital')}</p><p className="text-white text-sm font-bold">KES {shareBal.toLocaleString()}</p></div>
-            <div><p className="text-green-300 text-xs">{t('farmerHome.harvestEarnings')}</p><p className="text-white text-sm font-bold">KES {Number(mem?.harvestAccountBalance || 0).toLocaleString()}</p></div>
+            <div><p className="text-green-300 text-xs">{t('farmerHome.harvestEarnings')}</p><p className="text-white text-sm font-bold">KES {totalHarvestEarnings.toLocaleString()}</p></div>
           </div>
         </div>
       </div>
@@ -614,11 +617,10 @@ export default function FarmerDashboard() {
         </div>
       ))}
 
-      {Number(mem?.harvestAccountBalance) > 0 && (
+      {totalHarvestEarnings > 0 && (
         <div className="bg-gradient-to-br from-teal-700 to-teal-500 rounded-3xl p-5 text-white shadow-lg">
           <p className="text-teal-100 text-xs font-medium tracking-wide">{t('farmerSavings.harvestEarningsTag')}</p>
-          <p className="text-teal-200 text-xs">{mem?.harvestAccountNumber}</p>
-          <p className="text-4xl font-black mt-2">KES {Number(mem?.harvestAccountBalance).toLocaleString()}</p>
+          <p className="text-4xl font-black mt-2">KES {totalHarvestEarnings.toLocaleString()}</p>
           <p className="text-teal-200 text-xs mt-1">{t('farmerSavings.harvestEarningsDesc')}</p>
         </div>
       )}

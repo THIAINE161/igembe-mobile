@@ -19,6 +19,7 @@ const AgentDashboard     = lazy(() => import('./pages/AgentDashboard'))
 const ResetPinPage       = lazy(() => import('./pages/ResetPinPage'))
 
 import Toast from './components/Toast'
+import InstallPrompt from './components/InstallPrompt'
 
 // ── Loading spinner shown while lazy pages load ───────────────────────────────
 function PageLoader() {
@@ -188,6 +189,7 @@ export default function App() {
       </Suspense>
 
       <Toast />
+      <InstallPrompt />
     </Router>
   )
 }
