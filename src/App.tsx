@@ -18,8 +18,7 @@ const AgrovetOrderPage   = lazy(() => import('./pages/AgrovetOrderPage'))
 const AgentDashboard     = lazy(() => import('./pages/AgentDashboard'))
 const ResetPinPage       = lazy(() => import('./pages/ResetPinPage'))
 
-// ── Connection status widget ──────────────────────────────────────────────────
-import ConnectionStatus from './components/ConnectionStatus'
+import Toast from './components/Toast'
 
 // ── Loading spinner shown while lazy pages load ───────────────────────────────
 function PageLoader() {
@@ -188,8 +187,7 @@ export default function App() {
         </Routes>
       </Suspense>
 
-      {/* Connection status — fixed bottom-right, only visible when offline */}
-      <ConnectionStatus />
+      <Toast />
     </Router>
   )
 }

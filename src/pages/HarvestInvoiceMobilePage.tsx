@@ -102,7 +102,7 @@ export default function HarvestInvoiceMobilePage() {
       {/* Top bar — hidden on print */}
       <div className="no-print bg-white border-b border-gray-200 px-5 py-4 sticky top-0 z-10 shadow-sm">
         <div className="flex items-center justify-between">
-          <button onClick={() => navigate('/farmer')}
+          <button onClick={() => navigate(-1)}
             className="flex items-center gap-2 text-gray-600 font-medium text-sm">
             ← Back
           </button>

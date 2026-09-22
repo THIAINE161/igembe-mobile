@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import LanguageSwitcher from '../components/LanguageSwitcher'
@@ -53,6 +53,32 @@ export default function FarmerDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError]       = useState('')
 
+  // Pull-to-refresh on the home tab — only arms when the page is already
+  // scrolled to the top, so it never fights normal scrolling further down.
+  const touchStartY = useRef(0)
+  const [pullY, setPullY] = useState(0)
+  const [ptrActive, setPtrActive] = useState(false)
+  const PULL_THRESHOLD = 64
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = window.scrollY === 0 ? e.touches[0].clientY : 0
+  }
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartY.current || window.scrollY > 0) return
+    const delta = e.touches[0].clientY - touchStartY.current
+    if (delta > 0) setPullY(Math.min(delta, 90))
+  }
+  const handleTouchEnd = async () => {
+    const shouldRefresh = pullY > PULL_THRESHOLD
+    setPullY(0)
+    touchStartY.current = 0
+    if (shouldRefresh) {
+      setPtrActive(true)
+      await load(false)
+      setPtrActive(false)
+    }
+  }
+
   useEffect(() => {
     if (!member?.id) { navigate('/login', { replace: true }); return }
     load()
@@ -77,12 +103,30 @@ export default function FarmerDashboard() {
   if (!member) return null
 
   if (loading) return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-      <div className="w-20 h-20 bg-green-600 rounded-3xl flex items-center justify-center shadow-xl">
-        <span className="text-white text-3xl font-black">IG</span>
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-gradient-to-br from-green-800 via-green-700 to-green-600 px-5 pt-14 pb-24">
+        <div className="flex justify-between items-start animate-pulse">
+          <div className="space-y-2">
+            <div className="h-3 w-24 bg-white/20 rounded-full" />
+            <div className="h-6 w-40 bg-white/30 rounded-lg" />
+            <div className="h-3 w-32 bg-white/20 rounded-full" />
+          </div>
+          <div className="flex gap-2">
+            <div className="w-10 h-10 bg-white/15 rounded-xl" />
+            <div className="w-10 h-10 bg-white/15 rounded-xl" />
+            <div className="w-10 h-10 bg-white/15 rounded-xl" />
+          </div>
+        </div>
+        <div className="mt-5 bg-white/15 rounded-3xl p-4 h-24 animate-pulse" />
       </div>
-      <Spinner size={8} />
-      <p className="text-gray-400 text-sm">{t('common.loading')}</p>
+      <div className="px-4 -mt-12 mb-4">
+        <div className="grid grid-cols-4 gap-3">
+          {[1, 2, 3, 4].map(i => <div key={i} className="bg-gray-200 rounded-2xl h-20 animate-pulse" />)}
+        </div>
+      </div>
+      <div className="px-4 space-y-4 pb-24">
+        {[1, 2, 3].map(i => <div key={i} className="bg-gray-200 rounded-2xl h-24 animate-pulse" />)}
+      </div>
     </div>
   )
 
@@ -579,13 +623,22 @@ export default function FarmerDashboard() {
         </div>
       )}
 
-      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
-        <p className="font-bold text-gray-700 text-sm mb-3">{t('farmerSavings.paybillTitle')}</p>
-        <div className="space-y-1 text-xs text-gray-600">
-          <p>{t('farmerSavings.paybillStep1')}</p>
-          <p>{t('farmerSavings.paybillStep2', { number: '174379' })}</p>
-          <p>{t('farmerSavings.paybillStep3', { number: mem?.memberNumber || '' })}</p>
-          <p>{t('farmerSavings.paybillStep4')}</p>
+      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 space-y-3">
+        <p className="font-black text-gray-900 text-sm">{t('farmerSavings.howToDepositTitle')}</p>
+
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+          <p className="text-xs font-bold text-green-800 mb-1">{t('farmerSavings.option1Title')}</p>
+          <p className="text-xs text-green-700 leading-relaxed">{t('farmerSavings.option1Text')}</p>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-700 mb-1.5">{t('farmerSavings.option2Title')}</p>
+          <div className="space-y-1 text-xs text-gray-600">
+            <p>{t('farmerSavings.paybillStep1')}</p>
+            <p>{t('farmerSavings.paybillStep2', { number: '174379' })}</p>
+            <p>{t('farmerSavings.paybillStep3', { number: mem?.memberNumber || '' })}</p>
+            <p>{t('farmerSavings.paybillStep4')}</p>
+          </div>
         </div>
       </div>
     </div>
@@ -787,11 +840,25 @@ export default function FarmerDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="pb-20">
-        {tab === 'home'     && <HomeTab />}
-        {tab === 'harvests' && <HarvestsTab />}
-        {tab === 'savings'  && <SavingsTab />}
-        {tab === 'loans'    && <LoansTab />}
-        {tab === 'profile'  && <ProfileTab />}
+        <div key={tab} className="tab-fade-in">
+          {tab === 'home' && (
+            <div onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+              {(pullY > 0 || ptrActive) && (
+                <div className="flex items-center justify-center overflow-hidden transition-all duration-150"
+                  style={{ height: ptrActive ? 50 : pullY }}>
+                  {ptrActive
+                    ? <Spinner size={5} />
+                    : <span className="text-xs text-gray-400 font-bold">{pullY > PULL_THRESHOLD ? '↑ Release to refresh' : '↓ Pull to refresh'}</span>}
+                </div>
+              )}
+              <HomeTab />
+            </div>
+          )}
+          {tab === 'harvests' && <HarvestsTab />}
+          {tab === 'savings'  && <SavingsTab />}
+          {tab === 'loans'    && <LoansTab />}
+          {tab === 'profile'  && <ProfileTab />}
+        </div>
       </div>
 
       {/* Fixed bottom navigation */}

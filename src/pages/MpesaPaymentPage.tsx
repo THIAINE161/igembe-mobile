@@ -19,6 +19,20 @@ const DESCS: Record<PayType, string> = {
   'harvest-withdraw': 'Withdraw your miraa earnings to M-Pesa.'
 }
 
+// Members may have phone numbers stored in various formats (254..., +254...,
+// spaced/dashed, or already 07...) — normalize to a clean 07XXXXXXXXX string
+// before sending to the backend. The backend also normalizes internally
+// (to 254...), but sending a consistent format here avoids surprises and
+// matches what's shown to the farmer on screen.
+function normalizePhone(raw: string): string {
+  const digits = (raw || '').replace(/[^0-9]/g, '')
+  if (digits.startsWith('254') && digits.length === 12) return '0' + digits.slice(3)
+  if (digits.startsWith('0') && digits.length === 10) return digits
+  if (digits.length === 9) return '0' + digits
+  const last9 = digits.slice(-9)
+  return last9.length === 9 ? '0' + last9 : digits
+}
+
 function Spinner({ size = 6 }: { size?: number }) {
   return (
     <svg className={`animate-spin h-${size} w-${size}`} viewBox="0 0 24 24" fill="none">
@@ -120,10 +134,12 @@ export default function MpesaPaymentPage() {
     setLoading(true)
     setError('')
 
+    const normalizedPhone = normalizePhone(member.phoneNumber)
+
     try {
       if (payType === 'deposit') {
         const r = await api.post('/api/mpesa/stk-push', {
-          phoneNumber: member.phoneNumber,
+          phoneNumber: normalizedPhone,
           amount: Math.ceil(amt),
           memberId: member.id
         })
@@ -140,7 +156,7 @@ export default function MpesaPaymentPage() {
 
       } else if (payType === 'repay') {
         const r = await api.post('/api/mpesa/loan-repayment', {
-          phoneNumber:  member.phoneNumber,
+          phoneNumber:  normalizedPhone,
           amount:       Math.ceil(amt),
           memberId:     member.id,
           loanId:       loanId       || undefined,
@@ -159,7 +175,7 @@ export default function MpesaPaymentPage() {
         // Withdrawal — no STK push needed, direct deduction
         const r = await api.post('/api/mpesa/withdraw', {
           memberId:    member.id,
-          phoneNumber: member.phoneNumber,
+          phoneNumber: normalizedPhone,
           amount:      Math.ceil(amt),
           accountId:   accountId || undefined
         })
@@ -252,7 +268,7 @@ export default function MpesaPaymentPage() {
         <div className="bg-blue-50 rounded-2xl p-4 mb-5">
           <p className="text-xs text-gray-400">Amount</p>
           <p className="text-3xl font-black text-blue-700">KES {Number(amount).toLocaleString()}</p>
-          <p className="text-xs text-gray-400 mt-1">Sending to: <span className="font-bold">{member?.phoneNumber}</span></p>
+          <p className="text-xs text-gray-400 mt-1">Sending to: <span className="font-bold">{normalizePhone(member?.phoneNumber || '')}</span></p>
         </div>
         <p className="text-xs text-gray-400 mb-5">
           This page updates automatically when your payment is confirmed. Do not close it.
@@ -349,7 +365,7 @@ export default function MpesaPaymentPage() {
                 {payType === 'deposit' || payType === 'repay' ? '📱 M-Pesa prompt will be sent to:' : '💸 Withdrawal sent to:'}
               </p>
               <p className="font-black text-gray-900">{member?.fullName}</p>
-              <p className="text-gray-600 text-sm">{member?.phoneNumber}</p>
+              <p className="text-gray-600 text-sm">{normalizePhone(member?.phoneNumber || '')}</p>
             </div>
 
             {/* Submit */}

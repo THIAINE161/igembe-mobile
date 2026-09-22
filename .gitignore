@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Keep environment variables out of version control
+.env
+.env.local
+.env.production
+*.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

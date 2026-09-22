@@ -26,16 +26,25 @@ body {
   min-height: 100%;
   width: 100%;
   background: #f9fafb;
+  overflow-x: hidden;
 }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.tab-fade-in { animation: fadeIn 150ms ease-in; }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-in { animation: toastIn 150ms ease-out; }
 
 /* Scrollbar hidden */
 * { scrollbar-width: none; -ms-overflow-style: none; }
 *::-webkit-scrollbar { display: none; }
 
-/* Better touch targets on mobile */
-@media (max-width: 767px) {
-  button { min-height: 44px; }
-}
+/* Minimum touch target size — applies everywhere, not just narrow viewports,
+   since this is a mobile-first app regardless of the browser window size. */
+button { min-height: 44px; }
 
 /* Tablet — slightly narrower content but still full bg */
 @media (min-width: 768px) and (max-width: 1279px) {

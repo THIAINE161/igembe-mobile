@@ -81,7 +81,7 @@ export default function NotificationsPage() {
       {/* Header */}
       <div className="bg-gradient-to-br from-green-800 to-green-600 px-5 pt-12 pb-8">
         <div className="flex items-center justify-between mb-1">
-          <button onClick={() => navigate('/farmer')} className="text-green-200 text-sm">← Back</button>
+          <button onClick={() => navigate(-1)} className="text-green-200 text-sm">← Back</button>
           <button onClick={fetchData} className="text-green-200 text-sm">🔄 Refresh</button>
         </div>
         <div className="flex items-center justify-between mt-4">

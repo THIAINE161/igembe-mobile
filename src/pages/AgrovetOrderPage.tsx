@@ -12,6 +12,7 @@ interface Product {
   stockQuantity: number
   brand?: string
   description?: string
+  productImageUrl?: string | null
 }
 
 interface CartItem extends Product {
@@ -161,7 +162,7 @@ export default function AgrovetOrderPage() {
       {/* Header */}
       <div className="bg-gradient-to-br from-green-800 to-green-600 px-5 pt-12 pb-5">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => navigate('/farmer')} className="text-green-200 text-sm">← Back</button>
+          <button onClick={() => navigate(-1)} className="text-green-200 text-sm">← Back</button>
           <h1 className="text-white text-lg font-black">🌱 AgroVet Shop</h1>
           <button onClick={() => setView('cart')} className="relative">
             <span className="text-2xl">🛒</span>
@@ -245,8 +246,12 @@ export default function AgrovetOrderPage() {
                   const inCart = cart.find(i => i.id === product.id)
                   return (
                     <div key={product.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
-                      <div className="bg-green-50 h-20 flex items-center justify-center text-4xl">
-                        {CATEGORY_EMOJI[product.category] || '📦'}
+                      <div className="bg-green-50 h-20 flex items-center justify-center text-4xl overflow-hidden">
+                        {product.productImageUrl ? (
+                          <img src={product.productImageUrl} alt={product.productName} className="w-full h-full object-cover" />
+                        ) : (
+                          CATEGORY_EMOJI[product.category] || '📦'
+                        )}
                       </div>
                       <div className="p-3">
                         <p className="font-bold text-gray-900 text-sm leading-tight line-clamp-2">

@@ -103,6 +103,25 @@ export default function HarvestSchedulePage() {
   const [showMap, setShowMap] = useState(false)
   const [farmLat, setFarmLat] = useState<number | null>(null)
   const [farmLng, setFarmLng] = useState<number | null>(null)
+  const [gpsStatus, setGpsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+
+  // One-tap GPS capture — quicker than tap-to-pin for a farmer standing on
+  // their own farm. Saves real coordinates so this harvest's map always
+  // works later (no text-location guessing needed on the agent side).
+  const useMyGpsLocation = () => {
+    if (!navigator.geolocation) { setGpsStatus('error'); return }
+    setGpsStatus('loading')
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setFarmLat(pos.coords.latitude)
+        setFarmLng(pos.coords.longitude)
+        setShowMap(true)
+        setGpsStatus('success')
+      },
+      () => setGpsStatus('error'),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    )
+  }
 
   if (!member) { navigate('/login', { replace: true }); return null }
 
@@ -186,6 +205,14 @@ export default function HarvestSchedulePage() {
             <input type="text" value={form.farmLocation} onChange={e => setForm(f => ({ ...f, farmLocation: e.target.value }))}
               placeholder="e.g. Mutuati, Laare, Maua"
               className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 bg-gray-50 text-sm" />
+
+            {/* One-tap GPS capture */}
+            <button type="button" onClick={useMyGpsLocation} disabled={gpsStatus === 'loading'}
+              className="w-full mt-2 bg-blue-50 border-2 border-blue-200 disabled:opacity-60 text-blue-700 text-xs font-bold py-2.5 rounded-xl hover:border-blue-400 transition-colors flex items-center justify-center gap-2">
+              {gpsStatus === 'loading' ? '⏳ Getting your location...' : '📍 Use My Current GPS Location'}
+            </button>
+            {gpsStatus === 'success' && <p className="text-xs text-green-600 font-bold mt-1">✅ GPS location saved</p>}
+            {gpsStatus === 'error' && <p className="text-xs text-red-500 font-bold mt-1">Couldn't get your location. Check location permissions.</p>}
 
             {/* Optional exact-pin map */}
             {!showMap ? (

@@ -2,11 +2,21 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
+import markerIcon from 'leaflet/dist/images/marker-icon.png'
+import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { useMobileStore } from '../store/mobileStore'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import NotificationBell from '../components/NotificationBell'
 import { useT } from '../lib/useT'
 import api from '../lib/api'
+
+// Leaflet's default marker icon resolves image paths relative to the CSS
+// file's own location, which breaks once webpack/Vite fingerprints and
+// relocates the images — the classic "broken marker" bug. Point it at the
+// bundled, hashed asset URLs instead.
+delete (L.Icon.Default.prototype as any)._getIconUrl
+L.Icon.Default.mergeOptions({ iconUrl: markerIcon, iconRetinaUrl: markerIcon2x, shadowUrl: markerShadow })
 
 type AgentTab = 'active' | 'completed' | 'prices' | 'profile'
 
@@ -33,227 +43,154 @@ function Spinner({ size = 5, cls = 'text-blue-600' }: { size?: number; cls?: str
   )
 }
 
-// ── Embedded map component (Uber/Bolt style) ────────────────────────────────
-// Tracks the agent's GPS live via watchPosition (not a single snapshot) and
-// moves the existing marker/route/distance badge in place, so it behaves
-// like a real live-tracking map instead of a one-time "here's where you were".
-function EmbeddedMap({ harvest }: { harvest: any }) {
+// ── Embedded map (GPS-only, synchronous) ────────────────────────────────────
+// No geocoding, no async coordinate resolution — a Nominatim round-trip was
+// the thing stalling the map before. If the harvest has real GPS coordinates
+// the map renders immediately in the same tick; if it doesn't, no map is
+// attempted at all (a free-text village name isn't trustworthy enough to
+// drop a pin from) — just a fallback card pointing the agent at WhatsApp/
+// Google Maps search instead.
+function AgentMap({ harvest }: { harvest: any }) {
   const t = useT()
   const mapRef         = useRef<HTMLDivElement>(null)
   const mapInst        = useRef<any>(null)
-  const farmMarkerRef  = useRef<any>(null)
-  const agentMarkerRef = useRef<any>(null)
-  const routeLineRef   = useRef<any>(null)
-  const distMarkerRef  = useRef<any>(null)
-  const watchIdRef     = useRef<number | null>(null)
-  const firstFixRef    = useRef(true)
 
-  const [status, setStatus] = useState<'loading' | 'ready' | 'no-location' | 'error'>('loading')
-  const [distanceKm, setDistanceKm] = useState<number | null>(null)
   const [liveTracking, setLiveTracking] = useState(false)
+  const [distanceKm, setDistanceKm] = useState<number | null>(null)
 
-  const farmLat  = Number(harvest.farmLatitude  || harvest.member?.latitude  || 0)
-  const farmLng  = Number(harvest.farmLongitude || harvest.member?.longitude || 0)
-  const hasFarmCoords = farmLat !== 0 && farmLng !== 0
+  const farmLat = Number(harvest.farmLatitude  || harvest.member?.latitude  || 0)
+  const farmLng = Number(harvest.farmLongitude || harvest.member?.longitude || 0)
+  const hasCoords = farmLat !== 0 && farmLng !== 0
+  const locationText = (harvest.farmLocation || harvest.member?.village || '').trim()
 
+  const phone = harvest.member?.phoneNumber || ''
+  const last9 = phone.replace(/[^0-9]/g, '').slice(-9)
+  const waLink = last9 ? `https://wa.me/254${last9}` : ''
+  const searchLink = `https://www.google.com/maps/search/?q=${encodeURIComponent((locationText || 'Igembe South') + ' Igembe Meru Kenya')}`
+  const navigateHref = hasCoords
+    ? `https://www.google.com/maps/dir/?api=1&destination=${farmLat},${farmLng}`
+    : searchLink
+
+  // Synchronous init — the map itself never waits on a network call. Agent
+  // GPS is fetched once in the background and layered on top if it arrives
+  // within 5s; if it doesn't, the farm marker alone is still a complete map.
   useEffect(() => {
-    if (!mapRef.current) return
-    let mounted = true
-    firstFixRef.current = true
+    if (!hasCoords || !mapRef.current) return
+    let cancelled = false
 
-    // Called on every GPS fix — moves markers in place instead of recreating
-    // them, so the agent's dot glides across the map like Uber/Bolt.
-    const onPosition = (lat: number, lng: number) => {
-      if (!mounted || !mapInst.current) return
-      const map = mapInst.current
+    if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
+    setLiveTracking(false)
+    setDistanceKm(null)
 
-      if (!agentMarkerRef.current) {
-        const agentIcon = L.divIcon({
-          html: `<div style="position:relative;width:34px;height:34px;">
-                   <div class="animate-ping" style="position:absolute;inset:2px;background:#2563eb;opacity:0.4;border-radius:50%;"></div>
-                   <div style="position:absolute;inset:5px;background:#2563eb;border-radius:50%;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,0.4);"></div>
-                 </div>`,
-          className: '',
-          iconSize: [34, 34],
-          iconAnchor: [17, 17]
-        })
-        agentMarkerRef.current = L.marker([lat, lng], { icon: agentIcon, zIndexOffset: 1000 })
-          .addTo(map)
-          .bindPopup('<b>📍 You (live)</b>')
-      } else {
-        agentMarkerRef.current.setLatLng([lat, lng])
-      }
+    const map = L.map(mapRef.current, {
+      zoomControl: true,
+      attributionControl: false,
+      dragging: true,
+      touchZoom: true,
+      doubleClickZoom: true,
+      scrollWheelZoom: false
+    }).setView([farmLat, farmLng], 15)
+    mapInst.current = map
 
-      if (hasFarmCoords) {
-        if (!routeLineRef.current) {
-          routeLineRef.current = L.polyline([[lat, lng], [farmLat, farmLng]], {
-            color: '#16a34a', weight: 3, dashArray: '8 5', opacity: 0.8
-          }).addTo(map)
-        } else {
-          routeLineRef.current.setLatLngs([[lat, lng], [farmLat, farmLng]])
-        }
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
 
-        // Haversine distance
-        const R = 6371
-        const dLat = (farmLat - lat) * Math.PI / 180
-        const dLng = (farmLng - lng) * Math.PI / 180
-        const a = Math.sin(dLat/2)**2 + Math.cos(lat*Math.PI/180)*Math.cos(farmLat*Math.PI/180)*Math.sin(dLng/2)**2
-        const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-        setDistanceKm(km)
+    const farmIcon = L.divIcon({
+      html: `<div style="background:#16a34a;color:white;border-radius:50% 50% 50% 0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 3px 12px rgba(0,0,0,0.3);transform:rotate(-45deg);border:3px solid white;">
+               <span style="transform:rotate(45deg)">🌿</span>
+             </div>`,
+      className: '',
+      iconSize: [36, 36],
+      iconAnchor: [18, 36]
+    })
+    L.marker([farmLat, farmLng], { icon: farmIcon }).addTo(map).bindPopup(`
+      <div style="font-family:sans-serif;min-width:160px;">
+        <p style="font-weight:900;margin:0 0 4px 0;color:#166534">${harvest.member?.fullName || 'Farm'}</p>
+        <p style="font-size:11px;color:#4b5563;margin:0">${locationText || 'Farm location'}</p>
+        ${harvest.estimatedWeightKg > 0 ? `<p style="font-size:11px;color:#4b5563;margin:4px 0 0 0">Est: ${harvest.estimatedWeightKg} kg</p>` : ''}
+      </div>
+    `, { maxWidth: 200 })
 
-        const mid = [(lat+farmLat)/2, (lng+farmLng)/2] as [number, number]
-        const distIcon = L.divIcon({
-          html: `<div style="background:white;border:2px solid #16a34a;color:#166534;font-weight:900;font-size:12px;padding:3px 8px;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.2);white-space:nowrap;">~${km.toFixed(1)} km away</div>`,
-          className: '',
-          iconAnchor: [40, 10]
-        })
-        if (!distMarkerRef.current) {
-          distMarkerRef.current = L.marker(mid, { icon: distIcon, interactive: false }).addTo(map)
-        } else {
-          distMarkerRef.current.setLatLng(mid)
-          distMarkerRef.current.setIcon(distIcon)
-        }
-      }
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          if (cancelled || !mapInst.current) return
+          const { latitude: lat, longitude: lng } = pos.coords
 
-      // Fit both points into view only on the very first fix — after that,
-      // keep tracking live without yanking the map away from the user.
-      if (firstFixRef.current) {
-        firstFixRef.current = false
-        if (hasFarmCoords) map.fitBounds([[lat, lng], [farmLat, farmLng]], { padding: [50, 50], maxZoom: 16 })
-        else map.setView([lat, lng], 15)
-      }
-
-      setLiveTracking(true)
-      if (mounted) setStatus('ready')
-    }
-
-    const init = () => {
-      if (!mounted || !mapRef.current) return
-
-      try {
-        // Remove old map
-        if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
-        farmMarkerRef.current = null
-        agentMarkerRef.current = null
-        routeLineRef.current = null
-        distMarkerRef.current = null
-
-        const defaultLat = hasFarmCoords ? farmLat : -0.3
-        const defaultLng = hasFarmCoords ? farmLng : 37.65
-
-        const map = L.map(mapRef.current, {
-          zoomControl: true,
-          attributionControl: true,
-          dragging: true,
-          touchZoom: true,
-          doubleClickZoom: true,
-          scrollWheelZoom: false
-        }).setView([defaultLat, defaultLng], hasFarmCoords ? 15 : 12)
-
-        mapInst.current = map
-
-        // Map tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-          maxZoom: 19
-        }).addTo(map)
-
-        if (hasFarmCoords) {
-          // Farm marker (green pin)
-          const farmIcon = L.divIcon({
-            html: `<div style="background:#16a34a;color:white;border-radius:50% 50% 50% 0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 3px 12px rgba(0,0,0,0.3);transform:rotate(-45deg);border:3px solid white;">
-                     <span style="transform:rotate(45deg)">🌿</span>
+          const agentIcon = L.divIcon({
+            html: `<div style="position:relative;width:34px;height:34px;">
+                     <div class="animate-ping" style="position:absolute;inset:2px;background:#2563eb;opacity:0.4;border-radius:50%;"></div>
+                     <div style="position:absolute;inset:5px;background:#2563eb;border-radius:50%;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,0.4);"></div>
                    </div>`,
             className: '',
-            iconSize: [36, 36],
-            iconAnchor: [18, 36]
+            iconSize: [34, 34],
+            iconAnchor: [17, 17]
           })
-          const farmMarker = L.marker([farmLat, farmLng], { icon: farmIcon }).addTo(map)
-          farmMarker.bindPopup(`
-            <div style="font-family:sans-serif;min-width:160px;">
-              <p style="font-weight:900;margin:0 0 4px 0;color:#166534">${harvest.member?.fullName || 'Farm'}</p>
-              <p style="font-size:11px;color:#4b5563;margin:0">${harvest.farmLocation || harvest.member?.village || 'Farm location'}</p>
-              ${harvest.estimatedWeightKg > 0 ? `<p style="font-size:11px;color:#4b5563;margin:4px 0 0 0">Est: ${harvest.estimatedWeightKg} kg</p>` : ''}
-            </div>
-          `, { maxWidth: 200 })
-          farmMarkerRef.current = farmMarker
+          L.marker([lat, lng], { icon: agentIcon, zIndexOffset: 1000 }).addTo(map).bindPopup('<b>📍 You</b>')
+          L.polyline([[lat, lng], [farmLat, farmLng]], { color: '#16a34a', weight: 3, dashArray: '8 5', opacity: 0.8 }).addTo(map)
 
-          if (navigator.geolocation) {
-            // Live tracking — fires repeatedly as the agent moves, Uber-style.
-            watchIdRef.current = navigator.geolocation.watchPosition(
-              pos => onPosition(pos.coords.latitude, pos.coords.longitude),
-              () => {
-                // No GPS fix yet/denied — just show the farm, don't block the map.
-                // Guard on the marker ref (not React state) since this closure
-                // is created once and state reads inside it would go stale.
-                if (mounted && !agentMarkerRef.current) {
-                  setStatus('ready')
-                  map.setView([farmLat, farmLng], 15)
-                  farmMarker.openPopup()
-                }
-              },
-              { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
-            )
-          } else {
-            setStatus('ready')
-            farmMarker.openPopup()
-          }
-        } else {
-          setStatus('no-location')
-        }
-      } catch (err) {
-        console.error('Map init error:', err)
-        if (mounted) setStatus('error')
-      }
+          const R = 6371
+          const dLat = (farmLat - lat) * Math.PI / 180
+          const dLng = (farmLng - lng) * Math.PI / 180
+          const a = Math.sin(dLat/2)**2 + Math.cos(lat*Math.PI/180)*Math.cos(farmLat*Math.PI/180)*Math.sin(dLng/2)**2
+          const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+          setDistanceKm(km)
+          setLiveTracking(true)
+
+          map.fitBounds([[lat, lng], [farmLat, farmLng]], { padding: [40, 40], maxZoom: 16 })
+        },
+        () => { /* denied/unavailable/timed out — farm marker alone stands fine */ },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
+      )
     }
-
-    // Hard timeout — if the map hasn't rendered within 10s (e.g. tile/network
-    // issues), stop showing an infinite spinner and fall back to a message.
-    const giveUp = setTimeout(() => { if (mounted) setStatus(s => s === 'loading' ? 'error' : s) }, 10000)
-
-    setTimeout(init, 100)
 
     return () => {
-      mounted = false
-      clearTimeout(giveUp)
-      if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
+      cancelled = true
       if (mapInst.current) { try { mapInst.current.remove() } catch (_) {} mapInst.current = null }
     }
-  }, [harvest.id])
+  }, [harvest.id, hasCoords, farmLat, farmLng])
 
-  if (status === 'no-location') return (
-    <div className="bg-gray-100 rounded-2xl h-52 flex flex-col items-center justify-center gap-2">
-      <span className="text-4xl">📍</span>
-      <p className="text-gray-500 text-sm font-medium">{t('map.noLocation')}</p>
-      <p className="text-gray-400 text-xs text-center whitespace-pre-line">{t('map.noLocationHint')}</p>
-    </div>
-  )
-
-  if (status === 'error') return (
-    <div className="bg-gray-100 rounded-2xl h-52 flex flex-col items-center justify-center gap-2">
-      <span className="text-4xl">🗺️</span>
-      <p className="text-gray-500 text-sm font-medium">{t('map.error')}</p>
-      <p className="text-gray-400 text-xs text-center whitespace-pre-line">{t('map.errorHint')}</p>
+  // No GPS coordinates at all — a free-text village name can't be trusted to
+  // place a pin, so don't try. Give the agent a fast path to the farmer
+  // instead (WhatsApp) or a manual area search.
+  if (!hasCoords) return (
+    <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex flex-col items-center gap-2 text-center">
+      <span className="text-3xl">📍</span>
+      <p className="text-green-900 font-bold text-sm">{t('map.farmLocationLabel', { location: locationText || '—' })}</p>
+      <p className="text-green-700 text-xs">{t('map.noGpsSet')}</p>
+      <div className="w-full flex flex-col gap-2 mt-2">
+        {waLink && (
+          <a href={waLink} target="_blank" rel="noopener noreferrer"
+            className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold text-sm rounded-xl py-2.5 transition-colors">
+            {t('map.whatsappFarmer')}
+          </a>
+        )}
+        <a href={searchLink} target="_blank" rel="noopener noreferrer"
+          className="w-full flex items-center justify-center gap-2 bg-white border border-green-300 hover:bg-green-100 text-green-800 font-bold text-sm rounded-xl py-2.5 transition-colors">
+          {t('map.searchArea')}
+        </a>
+      </div>
     </div>
   )
 
   return (
-    <div className="relative">
-      <div ref={mapRef} style={{ height: 280, borderRadius: 16, overflow: 'hidden', zIndex: 1 }} />
-      {status === 'loading' && (
-        <div className="absolute inset-0 bg-gray-100 rounded-2xl flex items-center justify-center z-10">
-          <div className="flex flex-col items-center gap-2">
-            <Spinner size={6} />
-            <p className="text-gray-500 text-xs">{t('map.loading')}</p>
+    <div>
+      <div className="relative">
+        <div ref={mapRef} style={{ height: 280, borderRadius: 20, overflow: 'hidden', zIndex: 1 }} />
+        {liveTracking && (
+          <div className="absolute top-2 left-2 bg-white/95 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-sm z-10">
+            <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+            <span className="text-xs font-bold text-gray-700">{t('map.live')}{distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ''}</span>
           </div>
-        </div>
-      )}
-      {liveTracking && (
-        <div className="absolute top-2 left-2 bg-white/95 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-sm z-10">
-          <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
-          <span className="text-xs font-bold text-gray-700">{t('map.live')}{distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ''}</span>
-        </div>
-      )}
+        )}
+      </div>
+      <a
+        href={navigateHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold text-sm rounded-xl py-2.5 transition-colors"
+      >
+        {t('map.navigate')}
+      </a>
     </div>
   )
 }
@@ -280,13 +217,15 @@ export default function AgentDashboard() {
   const [actualKg, setActualKg] = useState('')
   const [notes,   setNotes]     = useState('')
 
-  // Grade modal
+  // Grade modal — grade names come from the admin-managed list so a grade
+  // added in the dashboard shows up here without an app update. Falls back
+  // to the historical defaults if the fetch fails.
+  const FALLBACK_GRADES = ['Grade 1', 'Grade 2', 'Gomba']
+  const buildGradeItems = (names: string[]) => names.map(n => ({ miraaGrade: n, weightKg: '', pricePerKg: '' }))
+
   const [showGrade, setShowGrade] = useState(false)
-  const [gradeItems, setGradeItems] = useState([
-    { miraaGrade:'Grade 1', weightKg:'', pricePerKg:'' },
-    { miraaGrade:'Grade 2', weightKg:'', pricePerKg:'' },
-    { miraaGrade:'Gomba',   weightKg:'', pricePerKg:'' },
-  ])
+  const [availableGrades, setAvailableGrades] = useState<string[]>(FALLBACK_GRADES)
+  const [gradeItems, setGradeItems] = useState(buildGradeItems(FALLBACK_GRADES))
   const [gradeLoading, setGradeLoading] = useState(false)
 
   useEffect(() => {
@@ -295,6 +234,29 @@ export default function AgentDashboard() {
     const interval = setInterval(() => load(false), 60_000)
     return () => clearInterval(interval)
   }, [agentData?.id])
+
+  useEffect(() => {
+    api.get('/api/miraa-grades')
+      .then(r => {
+        const names = (r.data?.data || []).map((g: any) => g.name)
+        if (names.length) { setAvailableGrades(names); setGradeItems(buildGradeItems(names)) }
+      })
+      .catch(() => {}) // keep fallback defaults
+  }, [])
+
+  // My Vehicle Driver — looked up by matching the agent's own vehicleReg
+  // against sacco_staff drivers, shown in the Profile tab.
+  const [vehicleDriver, setVehicleDriver] = useState<any>(null)
+  const [vehicleDriverChecked, setVehicleDriverChecked] = useState(false)
+  useEffect(() => {
+    const vehicleReg = dashData?.agent?.vehicleReg || agentData?.vehicleReg
+    if (!vehicleReg) { setVehicleDriverChecked(true); return }
+    setVehicleDriverChecked(false)
+    api.get(`/api/staff/driver-by-vehicle/${encodeURIComponent(vehicleReg)}`)
+      .then(r => setVehicleDriver(r.data?.data || null))
+      .catch(() => setVehicleDriver(null))
+      .finally(() => setVehicleDriverChecked(true))
+  }, [dashData?.agent?.vehicleReg, agentData?.vehicleReg])
 
   const load = useCallback(async (spinner = true) => {
     if (!agentData?.id) return
@@ -347,7 +309,7 @@ export default function AgentDashboard() {
       })
       showSuccess(t('agentMsg.gradedSuccess'))
       setShowGrade(false)
-      setGradeItems([{ miraaGrade:'Grade 1', weightKg:'', pricePerKg:'' },{ miraaGrade:'Grade 2', weightKg:'', pricePerKg:'' },{ miraaGrade:'Gomba', weightKg:'', pricePerKg:'' }])
+      setGradeItems(buildGradeItems(availableGrades))
       await load(false)
       setSelectedH(null)
     } catch (e: any) {
@@ -360,12 +322,22 @@ export default function AgentDashboard() {
   if (!agentData) return null
 
   if (loading) return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-      <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center shadow-xl">
-        <span className="text-white text-3xl font-black">IG</span>
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-gradient-to-br from-blue-800 to-blue-600 px-5 pt-12 pb-8">
+        <div className="flex justify-between items-start animate-pulse">
+          <div className="space-y-2">
+            <div className="h-3 w-24 bg-white/20 rounded-full" />
+            <div className="h-6 w-36 bg-white/30 rounded-lg" />
+          </div>
+          <div className="w-10 h-10 bg-white/15 rounded-xl" />
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2 animate-pulse">
+          {[1, 2, 3].map(i => <div key={i} className="bg-white/15 rounded-2xl h-16" />)}
+        </div>
       </div>
-      <Spinner size={8} />
-      <p className="text-gray-400 text-sm">{t('agentHeader.loadingPortal')}</p>
+      <div className="px-4 -mt-4 space-y-3 pb-8">
+        {[1, 2, 3].map(i => <div key={i} className="bg-white rounded-2xl h-28 shadow-sm animate-pulse" />)}
+      </div>
     </div>
   )
 
@@ -418,7 +390,8 @@ export default function AgentDashboard() {
           {gradeItems.map((item, idx) => {
             const sub = Number(item.weightKg||0) * Number(item.pricePerKg||0)
             const ref = prices.find((p: any) => p.miraaGrade === item.miraaGrade)
-            const dotColor = idx===0?'bg-green-500':idx===1?'bg-blue-500':'bg-orange-500'
+            const dotColors = ['bg-green-500', 'bg-blue-500', 'bg-orange-500', 'bg-purple-500', 'bg-teal-500']
+            const dotColor = dotColors[idx % dotColors.length]
             return (
               <div key={item.miraaGrade} className="bg-white rounded-2xl p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
@@ -591,7 +564,7 @@ export default function AgentDashboard() {
                 {t('agentDetail.openInGoogleMaps')}
               </a>
             </div>
-            <EmbeddedMap harvest={selectedH} />
+            <AgentMap harvest={selectedH} />
             <div className="flex items-center gap-4 mt-2 text-xs text-gray-400 justify-center">
               <span>{t('agentDetail.legendFarm')}</span>
               <span>{t('agentDetail.legendYou')}</span>
@@ -878,6 +851,48 @@ export default function AgentDashboard() {
               </div>
             ))}
           </div>
+
+          {/* My Vehicle Driver — only relevant when the agent has a vehicle assigned */}
+          {aInfo?.vehicleReg && (
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <p className="font-black text-gray-900 mb-2">🚗 Your Assigned Vehicle Driver</p>
+              {!vehicleDriverChecked ? (
+                <p className="text-gray-400 text-sm py-2">Loading...</p>
+              ) : vehicleDriver ? (
+                <div className="space-y-2.5">
+                  {[
+                    { label: 'Driver Name', value: vehicleDriver.fullName },
+                    { label: 'Phone', value: vehicleDriver.phoneNumber },
+                    { label: 'Vehicle', value: vehicleDriver.vehicleReg },
+                  ].map(r => (
+                    <div key={r.label} className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-gray-400 text-sm">{r.label}</span>
+                      <span className="font-bold text-gray-900 text-sm">{r.value || '—'}</span>
+                    </div>
+                  ))}
+                  {vehicleDriver.phoneNumber && (() => {
+                    const last9 = String(vehicleDriver.phoneNumber).replace(/[^0-9]/g, '').slice(-9)
+                    return (
+                      <div className="flex gap-2 mt-3">
+                        <a href={`tel:${vehicleDriver.phoneNumber}`}
+                          className="flex-1 bg-blue-600 text-white text-sm font-bold py-2.5 rounded-xl text-center">
+                          📞 Call Driver
+                        </a>
+                        {last9 && (
+                          <a href={`https://wa.me/254${last9}`} target="_blank" rel="noopener noreferrer"
+                            className="flex-1 bg-green-600 text-white text-sm font-bold py-2.5 rounded-xl text-center">
+                            💬 WhatsApp Driver
+                          </a>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm py-2">No driver assigned to your vehicle yet. Contact SACCO office.</p>
+              )}
+            </div>
+          )}
 
           {/* Language */}
           <div className="bg-white rounded-2xl shadow-sm p-4 flex items-center justify-between">

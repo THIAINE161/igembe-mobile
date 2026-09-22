@@ -83,7 +83,7 @@ export default function NewHarvestMobilePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-gradient-to-br from-green-800 to-green-600 px-5 pt-12 pb-6">
-        <button onClick={() => navigate('/farmer')}
+        <button onClick={() => navigate(-1)}
           className="text-green-200 text-sm mb-4 flex items-center gap-2">
           ← Back
         </button>

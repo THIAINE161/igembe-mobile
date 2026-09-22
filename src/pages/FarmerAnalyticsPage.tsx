@@ -91,7 +91,7 @@ export default function FarmerAnalyticsPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
       <p className="text-4xl mb-4">⚠️</p>
       <p className="text-gray-700 font-bold mb-4">{error}</p>
-      <button onClick={() => navigate('/farmer')} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold">← Back</button>
+      <button onClick={() => navigate(-1)} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold">← Back</button>
     </div>
   )
 
@@ -106,7 +106,7 @@ export default function FarmerAnalyticsPage() {
               style={{ left: `${i * 20}%`, top: `${(i % 2) * 50}%`, opacity: 0.1 }} />
           ))}
         </div>
-        <button onClick={() => navigate('/farmer')} className="text-green-200 text-sm mb-4 relative z-10">← Back</button>
+        <button onClick={() => navigate(-1)} className="text-green-200 text-sm mb-4 relative z-10">← Back</button>
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center">
