@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Igembe SACCO brand green — splash screen and window background -->
+    <color name="green_dark">#15803d</color>
+</resources>

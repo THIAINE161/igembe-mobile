@@ -9,14 +9,25 @@
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
+    <!-- Main theme once launched. The green window background covers the gap
+         while the WebView loads the app (was @null, which showed black). -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/green_dark</item>
     </style>
 
-
+    <!-- Launch theme (AndroidX core-splashscreen). The un-prefixed
+         windowSplashScreen* attributes are the compat versions — they work on
+         every Android version; the android:-prefixed ones are Android 12+ only.
+         Android < 12 draws the window background (@drawable/splash); Android 12+
+         draws the system splash from windowSplashScreenBackground + icon. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/green_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_round</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

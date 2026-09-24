@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch splash: branded logo centered on SACCO green. Used by the launch
+     theme (styles.xml) on Android < 12 and by the @capacitor/splash-screen
+     plugin (capacitor.config.ts: androidSplashResourceName "splash"). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <color android:color="@color/green_dark"/>
+    </item>
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher"/>
+    </item>
+</layer-list>
