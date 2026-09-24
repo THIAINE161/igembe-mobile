@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import LanguageSwitcher from '../components/LanguageSwitcher'
+import SaccoLogo from '../components/SaccoLogo'
 import { useT } from '../lib/useT'
 import api from '../lib/api'
 
@@ -38,7 +39,15 @@ export default function MobileLoginPage() {
       else if (data.roles?.includes('agent')) navigate('/agent', { replace: true })
       else setError(t('login.errUnknownAccount'))
     } catch (err: any) {
-      setError(err.response?.data?.error || t('login.errLoginFailed'))
+      if (!err.response) {
+        setError('📡 No internet connection. Please connect to WiFi or mobile data to login.')
+      } else if (err.response.status === 401) {
+        setError('❌ Wrong phone number or PIN. Try again or use Forgot PIN.')
+      } else if (err.response.status === 500) {
+        setError('⚠️ Server temporarily unavailable. Please try again in a moment.')
+      } else {
+        setError(err.response?.data?.error || t('login.errLoginFailed'))
+      }
     } finally {
       setLoading(false)
     }
@@ -72,12 +81,7 @@ export default function MobileLoginPage() {
 
           {/* Logo */}
           <div className="mb-6 flex flex-col items-center">
-            <div className="w-24 h-24 bg-white rounded-3xl shadow-2xl flex items-center justify-center border-4 border-green-400/60 mb-4">
-              <div className="text-center leading-tight">
-                <p className="text-green-700 text-3xl font-black">IG</p>
-                <p className="text-green-500 text-[10px] font-extrabold tracking-widest">SACCO</p>
-              </div>
-            </div>
+            <div className="mb-4"><SaccoLogo /></div>
             <h1 className="text-white text-3xl font-black text-center drop-shadow-xl tracking-tight">
               Igembe SACCO
             </h1>

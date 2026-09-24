@@ -19,7 +19,6 @@ export default function ForgotPinPage() {
   const [confirmPin, setConfirmPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [debugCode, setDebugCode] = useState('')
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,8 +27,7 @@ export default function ForgotPinPage() {
     setError('')
     try {
       const clean = normalizePhone(phone.trim())
-      const r = await api.post('/api/mobile/forgot-pin', { phoneNumber: clean })
-      if (r.data.debugCode) setDebugCode(r.data.debugCode) // dev only
+      await api.post('/api/mobile/forgot-pin', { phoneNumber: clean })
       setStep('code')
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed. Check your phone number.')
@@ -100,12 +98,6 @@ export default function ForgotPinPage() {
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm flex justify-between">
             <span>⚠️ {error}</span>
             <button onClick={() => setError('')} className="font-bold">×</button>
-          </div>
-        )}
-
-        {debugCode && (
-          <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 px-4 py-3 rounded-2xl text-sm">
-            Dev mode — Reset code: <strong>{debugCode}</strong>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import NotificationBell from '../components/NotificationBell'
+import SaccoLogo from '../components/SaccoLogo'
 import HarvestStepper from '../components/HarvestStepper'
 import { useT } from '../lib/useT'
 import api from '../lib/api'
@@ -44,14 +45,21 @@ function MiniBar({ value, max, color = '#16a34a', label = '' }: { value: number;
 
 export default function FarmerDashboard() {
   const navigate  = useNavigate()
-  const { member, logout } = useMobileStore()
+  const { member, logout, notifications } = useMobileStore()
   const t = useT()
 
   const [tab, setTab]           = useState<Tab>('home')
   const [data, setData]         = useState<any>(null)
   const [loading, setLoading]   = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError]       = useState('')
+
+  // Freshness indicators: a brief green flash on the balance card plus a
+  // pulse on the header "Live" dot after any silent (non-initial) refresh.
+  // `offline` only flips true on a real network error (no response reached
+  // the server at all) — a reachable server returning an error status is
+  // not "offline", so silent refreshes never show it for that case.
+  const [flash, setFlash] = useState(false)
+  const [offline, setOffline] = useState(false)
 
   // Pull-to-refresh on the home tab — only arms when the page is already
   // scrolled to the top, so it never fights normal scrolling further down.
@@ -82,22 +90,55 @@ export default function FarmerDashboard() {
   useEffect(() => {
     if (!member?.id) { navigate('/login', { replace: true }); return }
     load()
-    const interval = setInterval(() => load(false), 60_000)
+    const interval = setInterval(() => load(false), 15_000)
     return () => clearInterval(interval)
   }, [member?.id])
 
+  // React to live SSE-sourced events (pushed into the global `notifications`
+  // store by useSSE at the app root) by refreshing right away instead of
+  // waiting out the rest of the 15s poll interval. Announcements, harvest
+  // status changes, and price updates all come back from the same single
+  // dashboard endpoint, so any of them just means "refresh now".
+  const lastHandledNotif = useRef<string | null>(null)
+  useEffect(() => {
+    const latest = notifications[0]
+    if (!latest) return
+    const key = latest.createdAt + latest.type
+    if (lastHandledNotif.current === key) return
+    lastHandledNotif.current = key
+    if (['announcement', 'harvest_status_changed', 'market_price_update'].includes(latest.type)) {
+      load(false)
+    }
+  }, [notifications])
+
   const load = useCallback(async (spinner = true) => {
     if (!member?.id) return
-    spinner ? setLoading(true) : setRefreshing(true)
+    if (spinner) setLoading(true)
     setError('')
     try {
       const r = await api.get(`/api/mobile/farmer/${member.id}/dashboard`)
       setData(r.data?.data)
+      setOffline(false)
+      if (!spinner) {
+        setFlash(true)
+        setTimeout(() => setFlash(false), 1000)
+      }
     } catch (e: any) {
+      if (!e.response) setOffline(true)
       if (spinner) setError(e.response?.data?.error || 'Failed to load. Check your connection.')
     } finally {
-      spinner ? setLoading(false) : setRefreshing(false)
+      if (spinner) setLoading(false)
     }
+  }, [member?.id])
+
+  const markAnnouncementRead = useCallback(async (id: string) => {
+    if (!member?.id) return
+    try { await api.post(`/api/announcements/${id}/read`, { memberId: member.id }) } catch {}
+  }, [member?.id])
+
+  const markAllAnnouncementsRead = useCallback(async () => {
+    if (!member?.id) return
+    try { await api.post('/api/announcements/read-all', { memberId: member.id }) } catch {}
   }, [member?.id])
 
   if (!member) return null
@@ -190,19 +231,36 @@ export default function FarmerDashboard() {
         <div className="absolute bottom-0 left-0 w-28 h-28 bg-white/5 rounded-full -translate-x-6 translate-y-6" />
 
         <div className="flex justify-between items-start relative">
-          <div>
-            <p className="text-green-300 text-xs font-medium tracking-wide">🌿 IGEMBE SACCO</p>
-            <h1 className="text-white text-2xl font-black mt-0.5">
-              Hello, {String(mem?.fullName || '').split(' ')[0]}!
-            </h1>
-            <p className="text-green-300 text-xs mt-1">{mem?.memberNumber} · {mem?.village}</p>
+          <div className="flex items-center gap-3 min-w-0">
+            <SaccoLogo />
+            <div className="min-w-0">
+              <p className="text-green-300 text-xs font-medium tracking-wide">🌿 IGEMBE SACCO</p>
+              <h1 className="text-white text-2xl font-black mt-0.5">
+                Hello, {String(mem?.fullName || '').split(' ')[0]}!
+              </h1>
+              <p className="text-green-300 text-xs mt-1">{mem?.memberNumber} · {mem?.village}</p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => load(false)}
-              className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
-              {refreshing ? <Spinner size={4} cls="text-white" /> : <span className="text-white">🔄</span>}
-            </button>
-            <NotificationBell onViewHarvest={() => setTab('harvests')} />
+          <div className="flex gap-2 items-center">
+            {offline ? (
+              <div className="flex items-center gap-1.5 bg-orange-500/20 border border-orange-400/30 px-2.5 h-10 rounded-xl">
+                <span className="text-orange-200 text-xs font-bold whitespace-nowrap">⚠ {t('farmerHome.offline')}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-white/10 px-2.5 h-10 rounded-xl">
+                <span className="relative flex h-2 w-2">
+                  {flash && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />}
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+                </span>
+                <span className="text-green-200 text-[10px] font-bold tracking-wide whitespace-nowrap">{t('farmerHome.live')}</span>
+              </div>
+            )}
+            <NotificationBell
+              onViewHarvest={() => setTab('harvests')}
+              announcements={announcements}
+              onAnnouncementRead={markAnnouncementRead}
+              onMarkAllAnnouncementsRead={markAllAnnouncementsRead}
+            />
             <button onClick={() => setTab('profile')}
               className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">
               <span className="text-white text-sm font-black">{String(mem?.fullName || 'U').charAt(0)}</span>
@@ -210,8 +268,11 @@ export default function FarmerDashboard() {
           </div>
         </div>
 
-        {/* Balance card */}
-        <div className="mt-5 bg-white/15 backdrop-blur-sm rounded-3xl p-4 border border-white/20">
+        {/* Balance card — briefly tints green on each silent refresh so the
+            farmer can see the data actually just updated. */}
+        <div className={`mt-5 backdrop-blur-sm rounded-3xl p-4 border transition-colors duration-1000 ${
+          flash ? 'bg-green-400/30 border-green-300/40' : 'bg-white/15 border-white/20'
+        }`}>
           <p className="text-green-200 text-xs">{t('farmerHome.balanceLabel')}</p>
           <p className="text-white text-4xl font-black mt-0.5">KES {totalSav.toLocaleString()}</p>
           <div className="flex gap-4 mt-2">
@@ -240,19 +301,6 @@ export default function FarmerDashboard() {
       </div>
 
       <div className="px-4 space-y-4 pb-24">
-        {/* Announcements */}
-        {announcements.filter((a: any) => !a.isRead).map((ann: any) => (
-          <div key={ann.id} className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <div className="flex items-start gap-2">
-              <span className="text-xl flex-shrink-0">📢</span>
-              <div>
-                <p className="font-bold text-blue-900 text-sm">{ann.title}</p>
-                <p className="text-blue-700 text-xs mt-1">{ann.message}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-
         {/* Harvest limit */}
         {todayLimit && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
@@ -829,11 +877,38 @@ export default function FarmerDashboard() {
         </button>
       </div>
 
-      {/* Help */}
-      <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
-        <p className="text-green-700 text-sm font-medium">{t('common.needHelp')}</p>
-        <a href="tel:0757630995" className="block font-black text-green-700 text-xl mt-1">📞 0757 630 995</a>
-        <p className="text-green-500 text-xs mt-1">{t('common.officeHours')}</p>
+      {/* SACCO Office */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-2">
+        <p className="font-black text-gray-900 mb-2">🏦 {t('common.saccoOffice')}</p>
+        <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+          <span className="text-2xl">🕐</span>
+          <div>
+            <p className="font-bold text-sm text-gray-900">{t('common.officeHoursLabel')}</p>
+            <p className="text-gray-500 text-xs">{t('common.officeHours')}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+          <span className="text-2xl">📍</span>
+          <div>
+            <p className="font-bold text-sm text-gray-900">{t('common.locationLabel')}</p>
+            <p className="text-gray-500 text-xs">Igembe South, Meru County</p>
+          </div>
+        </div>
+        <a href="tel:0757630995" className="flex items-center gap-3 bg-green-50 rounded-xl p-3 active:bg-green-100">
+          <span className="text-2xl">📞</span>
+          <div>
+            <p className="font-bold text-sm text-gray-900">{t('common.callSaccoOffice')}</p>
+            <p className="text-green-600 text-xs">0757 630 995</p>
+          </div>
+        </a>
+        <a href="https://wa.me/254757630995" target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-3 bg-green-50 rounded-xl p-3 active:bg-green-100">
+          <span className="text-2xl">💬</span>
+          <div>
+            <p className="font-bold text-sm text-gray-900">{t('common.whatsappSacco')}</p>
+            <p className="text-green-600 text-xs">+254 757 630 995</p>
+          </div>
+        </a>
       </div>
     </div>
   )
@@ -853,7 +928,10 @@ export default function FarmerDashboard() {
                     : <span className="text-xs text-gray-400 font-bold">{pullY > PULL_THRESHOLD ? '↑ Release to refresh' : '↓ Pull to refresh'}</span>}
                 </div>
               )}
-              <HomeTab />
+              {/* Called, not rendered as <HomeTab />: HomeTab is redefined on
+                  every render, so as a component it would remount (resetting
+                  NotificationBell's open state) on each poll/flash/pull. */}
+              {HomeTab()}
             </div>
           )}
           {tab === 'harvests' && <HarvestsTab />}

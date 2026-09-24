@@ -8,6 +8,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { useMobileStore } from '../store/mobileStore'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import NotificationBell from '../components/NotificationBell'
+import SaccoLogo from '../components/SaccoLogo'
 import { useT } from '../lib/useT'
 import api from '../lib/api'
 
@@ -60,15 +61,17 @@ function AgentMap({ harvest }: { harvest: any }) {
 
   const farmLat = Number(harvest.farmLatitude  || harvest.member?.latitude  || 0)
   const farmLng = Number(harvest.farmLongitude || harvest.member?.longitude || 0)
-  const hasCoords = farmLat !== 0 && farmLng !== 0
+  const hasCoords = farmLat !== 0 && farmLng !== 0 && !isNaN(farmLat) && !isNaN(farmLng)
   const locationText = (harvest.farmLocation || harvest.member?.village || '').trim()
 
   const phone = harvest.member?.phoneNumber || ''
   const last9 = phone.replace(/[^0-9]/g, '').slice(-9)
   const waLink = last9 ? `https://wa.me/254${last9}` : ''
-  const searchLink = `https://www.google.com/maps/search/?q=${encodeURIComponent((locationText || 'Igembe South') + ' Igembe Meru Kenya')}`
+  // "api=1" is Google's documented cross-platform URL format — without it,
+  // some Google Maps app versions reject the link as "unsupported".
+  const searchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((locationText || 'Igembe South') + ' Igembe Meru Kenya')}`
   const navigateHref = hasCoords
-    ? `https://www.google.com/maps/dir/?api=1&destination=${farmLat},${farmLng}`
+    ? `https://www.google.com/maps/dir/?api=1&destination=${farmLat},${farmLng}&travelmode=driving`
     : searchLink
 
   // Synchronous init — the map itself never waits on a network call. Agent
@@ -217,6 +220,19 @@ export default function AgentDashboard() {
   const [actualKg, setActualKg] = useState('')
   const [notes,   setNotes]     = useState('')
 
+  // Report-issue (reject) modal
+  const REJECT_REASONS = [
+    'Miraa quality below standard',
+    'Farm location inaccessible',
+    'Farmer not available',
+    'Vehicle breakdown',
+    'Safety concern',
+    'Other',
+  ]
+  const [showReject, setShowReject]     = useState(false)
+  const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0])
+  const [rejectNotes, setRejectNotes]   = useState('')
+
   // Grade modal — grade names come from the admin-managed list so a grade
   // added in the dashboard shows up here without an app update. Falls back
   // to the historical defaults if the fetch fails.
@@ -295,6 +311,13 @@ export default function AgentDashboard() {
     if (!actualKg || Number(actualKg) <= 0) { setActionError(t('agentMsg.enterValidWeight')); return }
     await doAction(selectedH.id, 'record-quantity', { actualWeightKg: Number(actualKg), agentNotes: notes || undefined })
     setShowQty(false); setActualKg(''); setNotes('')
+  }
+
+  const handleReject = async () => {
+    const harvestId = selectedH.id
+    await doAction(harvestId, 'remove-agent', { reason: rejectReason, notes: rejectNotes || undefined })
+    setShowReject(false); setRejectReason(REJECT_REASONS[0]); setRejectNotes('')
+    setSelectedH(null)
   }
 
   const handleGrade = async () => {
@@ -482,14 +505,56 @@ export default function AgentDashboard() {
     </div>
   )
 
+  if (showReject && selectedH) return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-gradient-to-br from-red-800 to-red-600 px-5 pt-12 pb-5">
+        <button onClick={() => { setShowReject(false); setActionError('') }} className="text-red-200 text-sm mb-3 block">{t('common.back')}</button>
+        <h1 className="text-white text-xl font-black">{t('agentDetail.reportIssueTitle')}</h1>
+        <p className="text-red-200 text-sm">{selectedH.harvestNumber} · {selectedH.member?.fullName}</p>
+      </div>
+      <div className="px-4 py-5 space-y-4">
+        {actionError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm">⚠️ {actionError}</div>}
+        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">{t('agentDetail.reasonLabel')}</label>
+            <select value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              className="w-full px-4 py-3.5 border-2 border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-500 bg-gray-50">
+              {REJECT_REASONS.map(r => {
+                const key = r === 'Miraa quality below standard' ? 'reasonQuality'
+                  : r === 'Farm location inaccessible' ? 'reasonInaccessible'
+                  : r === 'Farmer not available' ? 'reasonFarmerUnavailable'
+                  : r === 'Vehicle breakdown' ? 'reasonVehicle'
+                  : r === 'Safety concern' ? 'reasonSafety' : 'reasonOther'
+                return <option key={r} value={r}>{t(`agentDetail.${key}`)}</option>
+              })}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">{t('agentDetail.notesLabel')}</label>
+            <textarea value={rejectNotes} onChange={e => setRejectNotes(e.target.value)} rows={3}
+              placeholder={t('agentDetail.notesPlaceholder')}
+              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-red-500 text-sm resize-none" />
+          </div>
+        </div>
+        <button onClick={handleReject} disabled={actionLoading}
+          className="w-full bg-red-600 disabled:bg-red-300 text-white font-black py-4 rounded-2xl text-lg flex items-center justify-center gap-2">
+          {actionLoading ? <><Spinner size={5} cls="text-white"/> {t('agentDetail.submittingReport')}</> : t('agentDetail.submitReport')}
+        </button>
+      </div>
+    </div>
+  )
+
   // ── Harvest detail view ───────────────────────────────────────────────────
   if (selectedH) {
     const phone    = selectedH.member?.phoneNumber || ''
     const last9    = phone.replace(/[^0-9]/g, '').slice(-9)
     const waLink   = `https://wa.me/254${last9}`
-    const dirLink  = selectedH.farmLatitude
-      ? `https://www.google.com/maps/dir/?api=1&destination=${selectedH.farmLatitude},${selectedH.farmLongitude}`
-      : `https://www.google.com/maps/search/?q=${encodeURIComponent(selectedH.farmLocation || selectedH.member?.village || 'Igembe South')}`
+    const selLat   = Number(selectedH.farmLatitude || selectedH.member?.latitude || 0)
+    const selLng   = Number(selectedH.farmLongitude || selectedH.member?.longitude || 0)
+    const selHasCoords = selLat !== 0 && selLng !== 0 && !isNaN(selLat) && !isNaN(selLng)
+    const dirLink  = selHasCoords
+      ? `https://www.google.com/maps/dir/?api=1&destination=${selLat},${selLng}&travelmode=driving`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedH.farmLocation || selectedH.member?.village || 'Igembe South') + ' Igembe Meru Kenya')}`
 
     return (
       <div className="min-h-screen bg-gray-50 pb-10">
@@ -580,9 +645,9 @@ export default function AgentDashboard() {
                   className="w-full bg-yellow-500 disabled:bg-yellow-300 text-white font-black py-4 rounded-2xl text-lg flex items-center justify-center gap-2">
                   {actionLoading ? <><Spinner size={5} cls="text-white"/> {t('agentDetail.starting')}</> : t('agentDetail.startHarvesting')}
                 </button>
-                <button onClick={() => doAction(selectedH.id, 'remove-agent')} disabled={actionLoading}
+                <button onClick={() => { setRejectReason(REJECT_REASONS[0]); setRejectNotes(''); setShowReject(true) }} disabled={actionLoading}
                   className="w-full border-2 border-red-200 text-red-600 font-bold py-3 rounded-2xl">
-                  {t('agentDetail.cancelUnassign')}
+                  {t('agentDetail.reportIssue')}
                 </button>
               </>
             )}
@@ -625,12 +690,15 @@ export default function AgentDashboard() {
         <div className="absolute left-0 bottom-0 w-28 h-28 bg-white/5 rounded-full -translate-x-6 translate-y-6" />
 
         <div className="flex justify-between items-start relative mb-5">
-          <div>
-            <p className="text-blue-300 text-xs font-medium tracking-wide">{t('agentHeader.portalTag')}</p>
-            <h1 className="text-white text-2xl font-black mt-0.5">
-              {String(aInfo?.fullName||'').split(' ')[0]}!
-            </h1>
-            <p className="text-blue-300 text-xs">{aInfo?.agentCode} · {aInfo?.vehicleReg || t('agentHeader.noVehicle')}</p>
+          <div className="flex items-center gap-3 min-w-0">
+            <SaccoLogo />
+            <div className="min-w-0">
+              <p className="text-blue-300 text-xs font-medium tracking-wide">{t('agentHeader.portalTag')}</p>
+              <h1 className="text-white text-2xl font-black mt-0.5">
+                {String(aInfo?.fullName||'').split(' ')[0]}!
+              </h1>
+              <p className="text-blue-300 text-xs">{aInfo?.agentCode} · {aInfo?.vehicleReg || t('agentHeader.noVehicle')}</p>
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => load(false)} className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center">

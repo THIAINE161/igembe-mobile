@@ -104,13 +104,25 @@ export default function HarvestSchedulePage() {
   const [farmLat, setFarmLat] = useState<number | null>(null)
   const [farmLng, setFarmLng] = useState<number | null>(null)
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [gpsError, setGpsError] = useState('')
+
+  const gpsFail = (message: string) => { setGpsError(message); setGpsStatus('error') }
 
   // One-tap GPS capture — quicker than tap-to-pin for a farmer standing on
   // their own farm. Saves real coordinates so this harvest's map always
   // works later (no text-location guessing needed on the agent side).
   const useMyGpsLocation = () => {
-    if (!navigator.geolocation) { setGpsStatus('error'); return }
+    // Browsers only allow geolocation on secure origins. The installed APK
+    // (https://localhost) and the live HTTPS site are fine; testing over
+    // plain http on the LAN (http://192.168.x.x) is not.
+    if (!window.isSecureContext) {
+      return gpsFail('GPS requires HTTPS. Please use the map pin option below or type your location manually.')
+    }
+    if (!navigator.geolocation) {
+      return gpsFail('GPS is not available on this device. Please pin your location on the map or type it manually.')
+    }
     setGpsStatus('loading')
+    setGpsError('')
     navigator.geolocation.getCurrentPosition(
       pos => {
         setFarmLat(pos.coords.latitude)
@@ -118,8 +130,14 @@ export default function HarvestSchedulePage() {
         setShowMap(true)
         setGpsStatus('success')
       },
-      () => setGpsStatus('error'),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      err => {
+        if (err.code === err.PERMISSION_DENIED) gpsFail('Please allow location access in your browser settings.')
+        else if (err.code === err.POSITION_UNAVAILABLE) gpsFail('GPS signal not available. Please pin your location on the map or type it manually.')
+        else if (err.code === err.TIMEOUT) gpsFail('Location took too long. Please try again or use the map pin.')
+        else gpsFail("Couldn't get your location. Please pin your location on the map or type it manually.")
+      },
+      // 15s: a cold GPS fix outdoors in rural areas can take well over 8s
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 
@@ -212,7 +230,7 @@ export default function HarvestSchedulePage() {
               {gpsStatus === 'loading' ? '⏳ Getting your location...' : '📍 Use My Current GPS Location'}
             </button>
             {gpsStatus === 'success' && <p className="text-xs text-green-600 font-bold mt-1">✅ GPS location saved</p>}
-            {gpsStatus === 'error' && <p className="text-xs text-red-500 font-bold mt-1">Couldn't get your location. Check location permissions.</p>}
+            {gpsStatus === 'error' && <p className="text-xs text-red-500 font-bold mt-1">{gpsError}</p>}
 
             {/* Optional exact-pin map */}
             {!showMap ? (
