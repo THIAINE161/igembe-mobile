@@ -8,11 +8,13 @@ const config: CapacitorConfig = {
     // Branded launch splash (android/app/src/main/res/drawable/splash.xml)
     // shown while the web app loads, instead of a blank screen.
     SplashScreen: {
-      launchShowDuration: 2000,
+      launchShowDuration: 2500,
       launchAutoHide: true,
       backgroundColor: '#15803d',
       androidSplashResourceName: 'splash',
-      showSpinner: false
+      showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: true
     }
   }
 };

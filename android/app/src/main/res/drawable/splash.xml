@@ -1,14 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Launch splash: branded logo centered on SACCO green. Used by the launch
-     theme (styles.xml) on Android < 12 and by the @capacitor/splash-screen
-     plugin (capacitor.config.ts: androidSplashResourceName "splash"). -->
+<!-- Full-screen splash: the 200dp branded logo centered on SACCO green.
+     The launch window background (styles.xml) and the drawable the
+     @capacitor/splash-screen plugin shows (androidSplashResourceName "splash").
+     Android 12+ shows its system splash instead — see splash_icon in styles.xml. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
-        <color android:color="@color/green_dark"/>
+        <shape>
+            <solid android:color="#15803d"/>
+        </shape>
     </item>
     <item>
         <bitmap
             android:gravity="center"
-            android:src="@drawable/splash_logo"/>
+            android:src="@drawable/splash_logo"
+            android:tileMode="disabled"/>
     </item>
 </layer-list>
