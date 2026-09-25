@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
+import LazyImage from '../components/LazyImage'
 
 interface Product {
   id: string
@@ -13,6 +14,7 @@ interface Product {
   brand?: string
   description?: string
   productImageUrl?: string | null
+  hasImage?: boolean
 }
 
 interface CartItem extends Product {
@@ -247,11 +249,9 @@ export default function AgrovetOrderPage() {
                   return (
                     <div key={product.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                       <div className="bg-green-50 h-20 flex items-center justify-center text-4xl overflow-hidden">
-                        {product.productImageUrl ? (
-                          <img src={product.productImageUrl} alt={product.productName} className="w-full h-full object-cover" />
-                        ) : (
-                          CATEGORY_EMOJI[product.category] || '📦'
-                        )}
+                        <LazyImage src={product.productImageUrl} has={product.hasImage} endpoint={`/api/agrovet/products/${product.id}/image`} field="imageUrl"
+                          alt={product.productName} className="w-full h-full object-cover"
+                          fallback={<>{CATEGORY_EMOJI[product.category] || '📦'}</>} />
                       </div>
                       <div className="p-3">
                         <p className="font-bold text-gray-900 text-sm leading-tight line-clamp-2">
