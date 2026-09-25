@@ -81,7 +81,7 @@ export default function MobileLoginPage() {
 
           {/* Logo */}
           <div className="mb-6 flex flex-col items-center">
-            <div className="mb-4"><SaccoLogo /></div>
+            <div className="mb-4"><SaccoLogo variant="full" size={150} /></div>
             <h1 className="text-white text-3xl font-black text-center drop-shadow-xl tracking-tight">
               Igembe SACCO
             </h1>

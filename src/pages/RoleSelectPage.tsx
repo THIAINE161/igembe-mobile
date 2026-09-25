@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
+import SaccoLogo from '../components/SaccoLogo'
 
 export default function RoleSelectPage() {
   const navigate = useNavigate()
@@ -14,9 +15,7 @@ export default function RoleSelectPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <div className="bg-gradient-to-br from-green-800 to-green-600 px-6 pt-12 pb-10 text-center">
-        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <span className="text-green-700 text-2xl font-black">IG</span>
-        </div>
+        <div className="flex justify-center mb-4"><SaccoLogo size={64} /></div>
         <h1 className="text-2xl font-black text-white">Welcome Back!</h1>
         <p className="text-green-200 text-sm mt-1">How would you like to sign in today?</p>
       </div>

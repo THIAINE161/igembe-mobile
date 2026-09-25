@@ -20,14 +20,13 @@ const ResetPinPage       = lazy(() => import('./pages/ResetPinPage'))
 
 import Toast from './components/Toast'
 import InstallPrompt from './components/InstallPrompt'
+import SaccoLogo from './components/SaccoLogo'
 
 // ── Loading spinner shown while lazy pages load ───────────────────────────────
 function PageLoader() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-      <div className="w-16 h-16 bg-green-600 rounded-3xl flex items-center justify-center shadow-xl">
-        <span className="text-white text-2xl font-black">IG</span>
-      </div>
+      <SaccoLogo size={64} />
       <svg
         className="animate-spin h-8 w-8 text-green-600"
         viewBox="0 0 24 24"

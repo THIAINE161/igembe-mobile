@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMobileStore } from '../store/mobileStore'
 import api from '../lib/api'
+import SaccoLogo from '../components/SaccoLogo'
 
 export default function HarvestInvoiceMobilePage() {
   const navigate = useNavigate()
@@ -39,9 +40,7 @@ export default function HarvestInvoiceMobilePage() {
 
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
-      <div className="w-16 h-16 bg-green-600 rounded-2xl flex items-center justify-center mb-4">
-        <span className="text-white text-2xl font-black">IG</span>
-      </div>
+      <div className="mb-4"><SaccoLogo size={64} /></div>
       <svg className="animate-spin h-6 w-6 text-green-600" viewBox="0 0 24 24" fill="none">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
@@ -121,9 +120,7 @@ export default function HarvestInvoiceMobilePage() {
           {/* Header */}
           <div className="bg-gradient-to-br from-green-800 to-green-600 p-6 text-white">
             <div className="flex items-center justify-between mb-4">
-              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center">
-                <span className="text-green-700 text-xl font-black">IG</span>
-              </div>
+              <SaccoLogo size={56} />
               <div className="text-right">
                 <p className="font-black text-xl">HARVEST INVOICE</p>
                 <p className="text-green-200 text-xs">Igembe Miraa Farmers SACCO</p>

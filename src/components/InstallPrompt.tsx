@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import SaccoLogo from './SaccoLogo'
 
 // Chrome/Android fire `beforeinstallprompt`, which we capture and defer so
 // we can show it on our own timing via a normal button instead of relying on
@@ -47,9 +48,7 @@ export default function InstallPrompt() {
 
   return (
     <div className="fixed bottom-20 left-4 right-4 z-[9997] bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 flex items-center gap-3">
-      <div className="w-11 h-11 bg-green-600 rounded-xl flex items-center justify-center flex-shrink-0">
-        <span className="text-white text-lg font-black">IG</span>
-      </div>
+      <SaccoLogo size={44} />
       <div className="flex-1 min-w-0">
         <p className="font-bold text-sm text-gray-900">Install Igembe SACCO</p>
         {isIOS && !deferredPrompt ? (
